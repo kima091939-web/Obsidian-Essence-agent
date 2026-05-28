@@ -1,11 +1,3 @@
-import streamlit as st
-import google.generativeai as genai
-from gtts import gTTS
-import PIL.Image
-import docx
-import pypdf
-import os
-
 # СИСТЕМНАЯ ПРОШИВКА
 SYSTEM_INSTRUCTION = """
 Ты — Мозг Студии 'Obsidian Essence'. Твоя роль: Операционный директор и Архитектор сюжета.
