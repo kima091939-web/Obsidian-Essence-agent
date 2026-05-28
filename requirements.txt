@@ -1,7 +1,6 @@
 streamlit
 google-generativeai
-gtts
-SpeechRecognition
 python-docx
 pypdf
 Pillow
+gTTS
