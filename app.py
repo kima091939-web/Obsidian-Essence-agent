@@ -61,15 +61,15 @@ if prompt := st.chat_input("Найти файл или дай команду н�
     with st.chat_message("user"): st.markdown(prompt)
     
     with st.chat_message("assistant"):
-        # Поиск (ИСПРАВЛЕНО: добавлен pageSize=10 для предотвращения ошибки)
+        # Поиск (ИСПРАВЛЕНО: добавлено spaces='drive' для глобального поиска)
         if "найди" in prompt.lower() or "поиск" in prompt.lower():
             query = prompt.replace("найди", "").replace("поиск", "").strip()
-            files = drive_service.files().list(q=f"name contains '{query}' and trashed=false", fields="files(id, name)", pageSize=10).execute().get('files', [])
+            files = drive_service.files().list(q=f"name contains '{query}' and trashed=false", fields="files(id, name)", spaces='drive', pageSize=10).execute().get('files', [])
             
             if files:
                 response = "Нашел файлы:\n" + "\n".join([f"- {f['name']} (ID: `{f['id']}`)" for f in files])
             else:
-                response = "Файлы не найдены."
+                response = f"Файлы по запросу '{query}' не найдены. Убедитесь, что сервисный аккаунт имеет доступ к папке на Диске."
         
         # Чтение
         elif "прочитай" in prompt.lower():
