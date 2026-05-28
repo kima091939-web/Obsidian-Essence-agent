@@ -1,0 +1,2 @@
+# Obsidian-Essence-agent
+Studio
