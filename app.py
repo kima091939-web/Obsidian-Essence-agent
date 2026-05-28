@@ -16,35 +16,40 @@ SYSTEM_INSTRUCTION = """
 """
 
 # Настройка API
-# Убедитесь, что в Streamlit Secrets ключ называется именно GOOGLE_API_KEY
 api_key = st.secrets["GOOGLE_API_KEY"]
 genai.configure(api_key=api_key)
 
-# Инициализация модели БЕЗ указания версии (использует стабильный путь по умолчанию)
-model = genai.GenerativeModel('gemini-1.5-pro')
+# Инициализация модели с системной инструкцией
+# Используем gemini-1.5-flash (она быстрее и стабильнее для чатов)
+model = genai.GenerativeModel(
+    model_name='gemini-1.5-flash',
+    system_instruction=SYSTEM_INSTRUCTION
+)
 
 st.title("Obsidian Essence: Studio Brain")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Функция обработки файлов
+# Функции обработки файлов
 def process_file(file):
     try:
         if file.type.startswith('image/'): return PIL.Image.open(file)
         if file.type == "application/pdf": 
-            return "\n".join([page.extract_text() for page in pypdf.PdfReader(file).pages])
+            reader = pypdf.PdfReader(file)
+            return "\n".join([page.extract_text() for page in reader.pages])
         if file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-            return "\n".join([para.text for para in docx.Document(file).paragraphs])
+            doc = docx.Document(file)
+            return "\n".join([para.text for para in doc.paragraphs])
         return file.getvalue().decode("utf-8")
     except Exception:
         return "Ошибка чтения файла."
 
-# Функция озвучки
 def speak_text(text):
     tts = gTTS(text=text, lang='ru')
-    tts.save("response.mp3")
-    st.audio("response.mp3")
+    filename = "response.mp3"
+    tts.save(filename)
+    st.audio(filename)
 
 # Интерфейс
 uploaded_file = st.file_uploader("➕ Загрузить файл", type=['png', 'jpg', 'jpeg', 'docx', 'pdf', 'txt'])
@@ -65,17 +70,18 @@ if prompt := st.chat_input("Введите задачу для Мозга Сту
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
+        # Подготовка контента
         contents = [prompt]
         if uploaded_file:
             contents.append(process_file(uploaded_file))
         
         try:
-            # Генерация ответа через модель
+            # Генерация ответа
             response = model.generate_content(contents)
             response_text = response.text
             st.markdown(response_text)
+            
             st.session_state.messages.append({"role": "assistant", "content": response_text})
-            # Перезагрузка для отображения кнопки озвучки
-            st.rerun()
+            st.rerun() # Перезагрузка для кнопки
         except Exception as e:
             st.error(f"Ошибка API: {e}")
