@@ -61,10 +61,10 @@ if prompt := st.chat_input("Найти файл или дай команду н�
     with st.chat_message("user"): st.markdown(prompt)
     
     with st.chat_message("assistant"):
-        # Поиск
+        # Поиск (ИСПРАВЛЕНО: добавлен pageSize=10 для предотвращения ошибки)
         if "найди" in prompt.lower() or "поиск" in prompt.lower():
             query = prompt.replace("найди", "").replace("поиск", "").strip()
-            files = drive_service.files().list(q=f"name contains '{query}' and trashed=false", fields="files(id, name)").execute().get('files', [])
+            files = drive_service.files().list(q=f"name contains '{query}' and trashed=false", fields="files(id, name)", pageSize=10).execute().get('files', [])
             
             if files:
                 response = "Нашел файлы:\n" + "\n".join([f"- {f['name']} (ID: `{f['id']}`)" for f in files])
@@ -82,5 +82,5 @@ if prompt := st.chat_input("Найти файл или дай команду н�
             response = model.generate_content(prompt).text
         
         st.markdown(response)
-        speak_text(response) # Звук восстановлен
+        speak_text(response) 
         st.session_state.messages.append({"role": "assistant", "content": response})
