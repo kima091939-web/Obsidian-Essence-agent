@@ -1,6 +1,7 @@
 streamlit
-google-generativeai
-gTTS
+google-generativeai>=0.8.0
+gtts
 Pillow
 python-docx
 pypdf
+
