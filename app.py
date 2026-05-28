@@ -18,7 +18,7 @@ SYSTEM_INSTRUCTION = """
 
 api_key = st.secrets.get("GOOGLE_API_KEY")
 genai.configure(api_key=api_key)
-model = genai.GenerativeModel(model_name='gemini-1.5-flash', system_instruction=SYSTEM_INSTRUCTION)
+model = genai.GenerativeModel(model_name='gemini-1.5-pro', system_instruction=SYSTEM_INSTRUCTION)
 
 st.title("Obsidian Essence: Studio Brain (Voice Enabled)")
 
