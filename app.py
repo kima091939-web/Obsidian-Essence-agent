@@ -38,7 +38,6 @@ def init_google_drive():
         creds_info = st.secrets["gcp_service_account"]
         creds_info_dict = dict(creds_info)
         creds_info_dict["private_key"] = creds_info_dict["private_key"].replace("\\n", "\n")
-        
         scopes = ['https://www.googleapis.com/auth/drive']
         creds = service_account.Credentials.from_service_account_info(creds_info_dict, scopes=scopes)
         return build('drive', 'v3', credentials=creds)
@@ -51,25 +50,35 @@ drive_service = init_google_drive()
 st.set_page_config(page_title="Obsidian Essence", layout="centered")
 st.title("Obsidian Essence: Studio Brain")
 
-# Функция получения файлов из папки
-def get_files_in_folder(service, folder_id):
+# Функция РЕКУРСИВНОГО глубокого сканирования папок и подпапок
+def display_folder_tree(service, folder_id, level=0):
     try:
         query = f"'{folder_id}' in parents and trashed=false"
         results = service.files().list(
             q=query,
             fields="files(id, name, mimeType)",
-            pageSize=30
+            pageSize=50
         ).execute()
-        return results.get('files', [])
+        items = results.get('files', [])
+        
+        # Отступы для визуализации дерева структуры
+        indent = "  " * level
+        
+        for item in items:
+            if item['mimeType'] == 'application/vnd.google-apps.folder':
+                st.markdown(f"{indent}📁 **{item['name']}**")
+                # Идём вглубь этой подпапки (рекурсия)
+                display_folder_tree(service, item['id'], level + 1)
+            else:
+                st.write(f"{indent}└ 📄 {item['name']}")
     except Exception:
-        return []
+        pass
 
-# Безопасное сканирование структуры (очищаем кавычки программно)
+# Сканирование структуры главных папок
 def scan_studio_structure(service):
     if not service:
         return
     try:
-        # Запрашиваем папки, доступные бону
         results = service.files().list(
             q="mimeType='application/vnd.google-apps.folder' and trashed=false",
             fields="files(id, name)"
@@ -78,25 +87,20 @@ def scan_studio_structure(service):
         
         found_any = False
         for folder in all_folders:
-            # Очищаем имя от лишних кавычек и пробелов для проверки
             clean_name = folder['name'].replace('"', '').replace("'", "").strip()
             
             if clean_name in ['_SYSTEM_SYNC_', 'Obsidian Essence']:
                 if not found_any:
-                    st.success("🤖 Синхронизация с Google Диском активна!")
+                    st.success("🤖 Синхронизация с облаком активна!")
                     found_any = True
                 
-                st.markdown(f"📁 **{folder['name']}**")
-                files = get_files_in_folder(service, folder['id'])
-                if files:
-                    for f in files:
-                        st.write(f"└ 📄 {f['name']}")
-                else:
-                    st.caption("   *(Папка пуста)*")
+                st.markdown(f"---")
+                st.markdown(f"🗂️ **КОРЕНЬ: {folder['name']}**")
+                # Запускаем глубокое построение дерева папок
+                display_folder_tree(service, folder['id'], level=1)
                     
         if not found_any:
             st.warning("⚠️ Структурные папки проекта не обнаружены на Диске.")
-            
     except Exception as e:
         st.error(f"Ошибка чтения структуры: {e}")
 
@@ -176,4 +180,3 @@ if prompt := st.chat_input("Введите задачу для Мозга Сту
             })
         except Exception as e:
             st.error(f"Ошибка API: {e}")
-
