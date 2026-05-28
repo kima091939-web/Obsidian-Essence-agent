@@ -67,7 +67,7 @@ drive_service = init_google_drive()
 st.set_page_config(page_title="Obsidian Essence", layout="centered")
 st.title("Obsidian Essence: Studio Brain")
 
-# Боковая панель теперь статична и не перегружает сеть запросами
+# Боковая панель
 with st.sidebar:
     st.header("Архитектура проекта")
     st.markdown("🤖 Мозг Obsidian Essence активен.")
@@ -121,7 +121,12 @@ if prompt := st.chat_input("Введите задачу для Мозга Сту
         if "найди" in prompt.lower() or "поиск" in prompt.lower():
             if drive_service:
                 try:
-                    query = prompt.lower().replace("найди", "").replace("поиск", "").strip()
+                    # ИСПРАВЛЕНИЕ: Глубокая очистка запроса от вводных слов ("мне", "пожалуйста", "файл")
+                    query = prompt.lower()
+                    for word in ["найди", "поиск", "мне", "пожалуйста", "файл", "файлы"]:
+                        query = query.replace(word, "")
+                    query = query.strip()
+                    
                     results = drive_service.files().list(
                         q=f"name contains '{query}' and trashed=false",
                         fields="files(id, name)",
@@ -132,7 +137,7 @@ if prompt := st.chat_input("Введите задачу для Мозга Сту
                     if files:
                         ai_response = "Нашел файлы на Google Диске:\n" + "\n".join([f"- {f['name']} (ID: `{f['id']}`)" for f in files])
                     else:
-                        ai_response = f"Файлы по вашему запросу '{query}' на Диске не найдены."
+                        ai_response = f"Файлы по вашему запросу '{query}' на Диске не найдены. Убедитесь в правильности имени файла."
                 except Exception as e:
                     ai_response = f"Не удалось выполнить поиск на Диске из-за сбоя сети: {e}"
             else:
@@ -158,7 +163,7 @@ if prompt := st.chat_input("Введите задачу для Мозга Сту
                 else:
                     ai_response = f"Сбой системы при генерации ответа: {e}"
 
-        # Вывод текста и воспроизведение звука для любого типа ответа
+        # Вывод текста и воспроизведение звука
         st.markdown(ai_response)
         
         audio_data = speak_text(ai_response)
@@ -170,3 +175,4 @@ if prompt := st.chat_input("Введите задачу для Мозга Сту
             "content": ai_response,
             "audio": audio_data
         })
+
