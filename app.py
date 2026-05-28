@@ -1,3 +1,11 @@
+import streamlit as st
+import google.generativeai as genai
+from gtts import gTTS
+import PIL.Image
+import docx
+import pypdf
+import os
+
 # СИСТЕМНАЯ ПРОШИВКА
 SYSTEM_INSTRUCTION = """
 Ты — Мозг Студии 'Obsidian Essence'. Твоя роль: Операционный директор и Архитектор сюжета.
@@ -8,13 +16,15 @@ SYSTEM_INSTRUCTION = """
 """
 
 # Настройка API
-api_key = st.secrets["GOOGLE_API_KEY"]
-genai.configure(api_key=api_key)
+if "GOOGLE_API_KEY" in st.secrets:
+    genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+else:
+    st.error("Ошибка: Ключ API не найден в настройках Secrets!")
+    st.stop()
 
-# Инициализация модели с системной инструкцией
-# Используем gemini-1.5-flash (она быстрее и стабильнее для чатов)
+# Инициализация модели
 model = genai.GenerativeModel(
-    model_name='gemini-1.5-flash',
+    model_name='gemini-1.5-pro',
     system_instruction=SYSTEM_INSTRUCTION
 )
 
@@ -23,7 +33,6 @@ st.title("Obsidian Essence: Studio Brain")
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Функции обработки файлов
 def process_file(file):
     try:
         if file.type.startswith('image/'): return PIL.Image.open(file)
@@ -39,14 +48,11 @@ def process_file(file):
 
 def speak_text(text):
     tts = gTTS(text=text, lang='ru')
-    filename = "response.mp3"
-    tts.save(filename)
-    st.audio(filename)
+    tts.save("response.mp3")
+    st.audio("response.mp3")
 
-# Интерфейс
 uploaded_file = st.file_uploader("➕ Загрузить файл", type=['png', 'jpg', 'jpeg', 'docx', 'pdf', 'txt'])
 
-# Отображение чата
 for i, message in enumerate(st.session_state.messages):
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
@@ -54,26 +60,19 @@ for i, message in enumerate(st.session_state.messages):
             if st.button(f"🔊 Озвучить", key=f"btn_{i}"):
                 speak_text(message["content"])
 
-# Ввод задачи
 if prompt := st.chat_input("Введите задачу для Мозга Студии..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    
     with st.chat_message("user"):
         st.markdown(prompt)
-
     with st.chat_message("assistant"):
-        # Подготовка контента
         contents = [prompt]
         if uploaded_file:
             contents.append(process_file(uploaded_file))
-        
         try:
-            # Генерация ответа
             response = model.generate_content(contents)
-            response_text = response.text
-            st.markdown(response_text)
-            
-            st.session_state.messages.append({"role": "assistant", "content": response_text})
-            st.rerun() # Перезагрузка для кнопки
+            st.markdown(response.text)
+            st.session_state.messages.append({"role": "assistant", "content": response.text})
+            st.rerun()
         except Exception as e:
             st.error(f"Ошибка API: {e}")
+
