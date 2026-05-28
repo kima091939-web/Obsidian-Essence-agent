@@ -1,65 +1,61 @@
 import streamlit as st
 import google.generativeai as genai
 from gtts import gTTS
-from streamlit_mic_recorder import mic_recorder
-import speech_recognition as sr
-import io
+import docx
 
-# Заголовок приложения
+# Системная инструкция (база знаний)
+SYSTEM_INSTRUCTION = """
+Ты — ИИ-агент проекта 'Obsidian Essence'. 
+Твои знания базируются на трех документах: 'OBSIDIAN_ESSENCE_MASTER_DOC_FINAL', 
+'OBSIDIAN_ESSENCE_STRUCTURE_MASTER_MAP' и 'РЕГЛАМЕНТ РАБОТЫ ПРОЕКТА OBSIDIAN ESSENCE V1'.
+
+Твои правила:
+1. Манифесты — это закон. Строго следуй регламенту, не создавай домыслов.
+2. Стиль общения: Конкретность, нулевая избыточность. Без вступлений и вежливости без инфо-нагрузки.
+3. Навигация: Сначала классификация, затем использование путей из 'OBSIDIAN_ESSENCE_STRUCTURE_MASTER_MAP'.
+4. Запрет на генерацию медиаконтента: Запрещено без явного согласия пользователя.
+5. Фиксация: Данные являются черновиком до команды 'Зафиксируй' или 'Запомни'.
+"""
+
+api_key = st.secrets.get("GOOGLE_API_KEY")
+genai.configure(api_key=api_key)
+
+# Модель с системной инструкцией
+model = genai.GenerativeModel(
+    model_name='gemini-1.5-flash',
+    system_instruction=SYSTEM_INSTRUCTION
+)
+
 st.title("Obsidian Essence Agent")
 
-# Конфигурация API
-api_key = st.secrets.get("GOOGLE_API_KEY")
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-if not api_key:
-    st.error("API-ключ не найден. Добавьте его в настройки Streamlit.")
-else:
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-pro')
+def process_file(file):
+    if file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        doc = docx.Document(file)
+        return "\n".join([para.text for para in doc.paragraphs])
+    return "Файл загружен"
 
-    # Инициализация истории чата
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+uploaded_file = st.file_uploader("➕ Загрузить файл", type=['png', 'jpg', 'docx', 'txt'])
 
-    # Функция распознавания речи
-    def speech_to_text(audio_bytes):
-        recognizer = sr.Recognizer()
-        audio_file = io.BytesIO(audio_bytes)
-        with sr.AudioFile(audio_file) as source:
-            audio_content = recognizer.record(source)
-        return recognizer.recognize_google(audio_content, language="ru-RU")
+for i, message in enumerate(st.session_state.messages):
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+        if message["role"] == "assistant":
+            if st.button(f"🔊 Прослушать {i}"):
+                tts = gTTS(text=message["content"], lang='ru')
+                tts.save("resp.mp3")
+                st.audio("resp.mp3")
 
-    # Отображение истории чата
-    for i, message in enumerate(st.session_state.messages):
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-            if message["role"] == "assistant":
-                if st.button(f"🔊 Прослушать {i}"):
-                    tts = gTTS(text=message["content"], lang='ru')
-                    tts.save("response.mp3")
-                    st.audio("response.mp3", format="audio/mp3")
-
-    # Голосовой ввод
-    audio_data = mic_recorder(start_prompt="🎙️ Нажать для записи", stop_prompt="⏹️ Остановить", key='mic')
+if prompt := st.chat_input("Ваш вопрос..."):
+    content_to_send = prompt
+    if uploaded_file:
+        content_to_send = f"Анализ файла {uploaded_file.name}: {process_file(uploaded_file)}\n\nВопрос: {prompt}"
     
-    if audio_data:
-        try:
-            text = speech_to_text(audio_data['bytes'])
-            st.session_state.messages.append({"role": "user", "content": text})
-            st.rerun()
-        except Exception as e:
-            st.error("Не удалось распознать речь.")
+    st.session_state.messages.append({"role": "user", "content": content_to_send})
+    
+    response = model.generate_content(content_to_send)
+    st.session_state.messages.append({"role": "assistant", "content": response.text})
+    st.rerun()
 
-    # Текстовый ввод
-    if prompt := st.chat_input("Что спросим у Obsidian?"):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        st.rerun()
-
-    # Генерация ответа, если последнее сообщение от пользователя
-    if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
-        user_text = st.session_state.messages[-1]["content"]
-        with st.chat_message("assistant"):
-            response = model.generate_content(user_text)
-            st.markdown(response.text)
-        st.session_state.messages.append({"role": "assistant", "content": response.text})
-        st.rerun()
