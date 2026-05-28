@@ -61,10 +61,16 @@ if prompt := st.chat_input("Найти файл или дай команду н�
     with st.chat_message("user"): st.markdown(prompt)
     
     with st.chat_message("assistant"):
-        # ВОЗВРАЩЕНА ЛОГИКА, КОТОРАЯ РАБОТАЛА
+        # Поиск
         if "найди" in prompt.lower() or "поиск" in prompt.lower():
             query = prompt.replace("найди", "").replace("поиск", "").strip()
-            results = drive_service.files().list(q=f"name contains '{query}' and trashed=false", fields="files(id, name)").execute()
+            # Добавлен параметр supportsAllDrives=True для видимости всех файлов
+            results = drive_service.files().list(
+                q=f"name contains '{query}' and trashed=false", 
+                fields="files(id, name)",
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True
+            ).execute()
             files = results.get('files', [])
             
             if files:
@@ -82,6 +88,5 @@ if prompt := st.chat_input("Найти файл или дай команду н�
             response = model.generate_content(prompt).text
         
         st.markdown(response)
-        speak_text(response) # Звук здесь есть
+        speak_text(response)
         st.session_state.messages.append({"role": "assistant", "content": response})
-
