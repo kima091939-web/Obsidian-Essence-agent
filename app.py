@@ -1,5 +1,4 @@
-
-import streamlit as str_input  # Переименовано во избежание конфликтов
+import streamlit as str_input  
 import streamlit as st
 import google.generativeai as genai
 from google.oauth2 import service_account
@@ -13,14 +12,13 @@ import pypdf
 import os
 import io
 import re
+import time  # Добавлено для контроля пауз
 
 # ==========================================
 # 0. КОНФИГУРАЦИЯ АВТОПИЛОТА ИЗ SECRETS
 # ==========================================
-# Код автоматически забирает ID, который вы только что добавили в Secrets телефона
 MASTER_MATRIX_ID = st.secrets.get("MASTER_MATRIX_ID", "1VoFiHqxgaNN9r1yqTpofL2z0l03WI_R4BGYhnG7rJlI")
 
-# ФУНДАМЕНТАЛЬНАЯ БАЗА ЗНАНИЙ И ПРОШИВКА (БЕЗ ЛИШНИХ ОГРАНИЧЕНИЙ)
 SYSTEM_INSTRUCTION = """
 Ты — Мозг Студии 'Obsidian Essence'. Твоя роль: Operational Director и Автономный Координатор проекта.
 Этот регламент является основополагающим и директивным. Любое отклонение — критическая ошибка.
@@ -75,10 +73,11 @@ def init_google_drive():
 drive_service = init_google_drive()
 
 # ==========================================
-# 3. ИНСТРУМЕНТЫ АВТОМАШИНЫ (TOOLS) ДЛЯ GEMINI
+# 3. ИНСТРУМЕНТЫ АВТОМАШИНЫ С ЗАЩИТОЙ ОТ СПАМА (ANTI-QUOTA LIMIT)
 # ==========================================
 def search_files_by_name(query: str) -> str:
-    """Ищет файлы на Google Диске по названию или его части."""
+    """Ищет файлы на Google Диске по названию с искусственной паузой."""
+    time.sleep(2.5)  # Защита от превышения RPM
     if not drive_service: return "Ошибка: Диск недоступен."
     try:
         q_query = f"(name contains '{query}' or name contains '{query.lower()}') and trashed=false"
@@ -89,7 +88,8 @@ def search_files_by_name(query: str) -> str:
     except Exception as e: return f"Ошибка поиска: {e}"
 
 def read_file_content(file_id: str) -> str:
-    """Считывает текстовое содержимое файла или Google Документа по его ID."""
+    """Считывает текстовое содержимое файла с искусственной паузой."""
+    time.sleep(2.5)  # Защита от превышения RPM
     if not drive_service: return "Ошибка: Диск недоступен."
     try:
         file_metadata = drive_service.files().get(fileId=file_id, fields="mimeType, name").execute()
@@ -103,12 +103,11 @@ def read_file_content(file_id: str) -> str:
 
 def read_sync_matrix() -> str:
     """Автоматически считывает содержимое центральной матрицы MASTER_SYNC_MATRIX."""
-    if not MASTER_MATRIX_ID or MASTER_MATRIX_ID == "ВАШ_ID_MASTER_SYNC_MATRIX_НА_ДИСКЕ":
-        return "Критическая ошибка: В Secrets не настроен MASTER_MATRIX_ID."
     return read_file_content(MASTER_MATRIX_ID)
 
 def update_sync_matrix(new_content: str) -> str:
-    """Полностью обновляет содержимое файла MASTER_SYNC_MATRIX новыми логами и статусами."""
+    """Полностью обновляет содержимое файла MASTER_SYNC_MATRIX новыми логами."""
+    time.sleep(2.5)  # Защита от превышения RPM
     if not drive_service: return "Ошибка: Диск недоступен."
     if not MASTER_MATRIX_ID or MASTER_MATRIX_ID == "ВАШ_ID_MASTER_SYNC_MATRIX_НА_ДИСКЕ":
         return "Критическая ошибка: В Secrets не настроен MASTER_MATRIX_ID."
@@ -120,7 +119,7 @@ def update_sync_matrix(new_content: str) -> str:
     except Exception as e:
         return f"Критический сбой при обновлении матрицы на Диске: {e}"
 
-# Инициализация Gemini с подключением функций автоматизации
+# Инициализация Gemini
 model = genai.GenerativeModel(
     model_name='gemini-2.5-flash',
     system_instruction=SYSTEM_INSTRUCTION,
@@ -131,12 +130,12 @@ model = genai.GenerativeModel(
 # 4. ИНТЕРФЕЙС STREAMLIT
 # ==========================================
 st.set_page_config(page_title="Obsidian Essence", layout="centered")
-st.title("Obsidian Essence: Autopilot Brain v3")
+st.title("Obsidian Essence: Autopilot Brain v3 (Safe-Mode)")
 
 with st.sidebar:
     st.header("Архитектура проекта")
-    st.markdown("🤖 Мозг Obsidian Essence переведен на АВТОПИЛОТ.")
-    st.markdown("Контроль контекста, синхронизация и логгирование выполняются ИИ автоматически.")
+    st.markdown("🤖 Мозг переведен в режим экономии лимитов (Safe-Mode).")
+    st.markdown("Паузы минимизируют риск падения ошибки 429.")
 
 if "messages" not in st.session_state: st.session_state.messages = []
 if "file_uploader_key" not in st.session_state: st.session_state.file_uploader_key = "file_uploader_0"
@@ -154,7 +153,7 @@ def process_file(file):
 def speak_text(text):
     try:
         clean_text = re.sub(r'[*_`#\-]', '', text)
-        if len(clean_text) > 300: clean_text = clean_text[:300] + "... Контроль процесса завершен."
+        if len(clean_text) > 300: clean_text = clean_text[:300] + "... Контроль завершен."
         tts = gTTS(text=clean_text, lang='ru')
         fp = io.BytesIO()
         tts.write_to_fp(fp)
@@ -184,12 +183,16 @@ if prompt := st.chat_input("Введите текущую задачу, стат
         contents.append(prompt)
         
         try:
-            # Запуск автономного чата с вызовом Python-функций на лету
+            # Запуск чата с защитой цепочки вызовов
             chat = model.start_chat(enable_automatic_function_calling=True)
             response = chat.send_message(contents)
             ai_response = response.text
         except Exception as e:
-            ai_response = f"Критический сбой управляющей системы: {e}"
+            # Если всё же поймали 429, даем понятное описание
+            if "429" in str(e):
+                ai_response = "Система временно перегружена запросами к Google API. Пожалуйста, подождите 30 секунд и повторите команду."
+            else:
+                ai_response = f"Критический сбой управляющей системы: {e}"
 
         st.markdown(ai_response)
         audio_bytes = speak_text(ai_response)
@@ -197,4 +200,3 @@ if prompt := st.chat_input("Введите текущую задачу, стат
         
         st.session_state.messages.append({"role": "assistant", "content": ai_response, "audio": audio_bytes})
         st.rerun()
-
