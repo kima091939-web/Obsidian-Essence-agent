@@ -3,45 +3,187 @@ import google.generativeai as genai
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
-st.set_page_config(layout="wide", page_title="Obsidian Essence: Универсальный Архитектор")
+# Настройка страницы
+st.set_page_config(layout="wide", page_title="Obsidian Essence Мозг")
 
 MASTER_MATRIX_ID = st.secrets.get("MASTER_MATRIX_ID", "1VoFiHqxgaNN9r1yqTpofL2z0l03WI_R4BGYhnG7rJlI")
 BLOCK_1_FOLDER_ID = st.secrets.get("BLOCK_1_FOLDER_ID", "") 
 
-# --- ИНИЦИАЛИЗАЦИЯ ---
-if "messages" not in st.session_state: st.session_state.messages = []
-if "request_count" not in st.session_state: st.session_state.request_count = 0
-if "matrix_summary" not in st.session_state: st.session_state.matrix_summary = "Нажмите «🔄 Сверить статус»"
+# --- ИНИЦИАЛИЗАЦИЯ СЕССИИ ---
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "request_count" not in st.session_state:
+    st.session_state.request_count = 0
+if "matrix_summary" not in st.session_state:
+    st.session_state.matrix_summary = "Нажмите «🔄 Сверить статус», чтобы прочитать матрицу."
 
-# --- БОКОВАЯ ПАНЕЛЬ (ПУЛЬТ) ---
+# --- БОКОВАЯ ПАНЕЛЬ ---
 with st.sidebar:
-    st.header("⚙️ Панель Управления")
-    work_mode = st.radio("Режим:", ["Просто чат", "Technical Architect (Диск + ИИ)"])
-    user_custom_key = st.text_input("Вставить новый API-ключ:", type="password")
-    if st.button("🔄 Сверить статус с Диска"): st.session_state.matrix_summary = "⏱️ Читаю..." ; st.rerun()
+    st.header("🧠 Пульт Управления")
+    
+    work_mode = st.radio("Режим бота:", ["Просто чат (Экономия API)", "Operational Director (С Диском)"])
+    st.write("---")
+    
+    st.subheader("🛡️ Контроль лимитов & API")
+    st.metric(label="Запросов в этой сессии", value=st.session_state.request_count)
+    
+    user_custom_key = st.text_input("Вставить новый API-ключ (при 429):", type="password")
+    
+    if st.button("🗑️ Сбросить зависший кэш чата"):
+        st.session_state.messages = []
+        st.session_state.request_count = 0
+        st.session_state.matrix_summary = "Нажмите «🔄 Сверить статус», чтобы прочитать матрицу."
+        st.rerun()
+        
+    st.write("---")
+    st.subheader("📋 Сценарная Архитектура")
+    st.caption("📊 4 Зоны • 5 Локаций • 5 Суток • 8 Серий • 4 Части по 8 сек (исходники под обрезку)")
+    
+    if st.button("🔄 Сверить статус с Диска"):
+        st.session_state.matrix_summary = "⏱️ Читаю матрицу проекта..."
+        st.rerun()
 
-# --- ИНИЦИАЛИЗАЦИЯ AI И DRIVE ---
+# --- API КЛЮЧ И ИНИЦИАЛИЗАЦИЯ ---
 final_api_key = user_custom_key if user_custom_key else st.secrets.get("GOOGLE_API_KEY")
+if not final_api_key:
+    st.error("Ключ GOOGLE_API_KEY не найден!")
+    st.stop()
+
 genai.configure(api_key=final_api_key)
 
-# (Инструменты: read_sync_matrix, update_sync_matrix, create_or_update_file_in_folder остаются неизменными)
-# ... (Код функций такой же, как в предыдущих итерациях) ...
+@st.cache_resource
+def init_google_drive():
+    try:
+        creds_info = st.secrets["gcp_service_account"]
+        creds_info_dict = dict(creds_info)
+        creds_info_dict["private_key"] = creds_info_dict["private_key"].replace("\\n", "\n")
+        return build('drive', 'v3', credentials=service_account.Credentials.from_service_account_info(creds_info_dict, scopes=['https://www.googleapis.com/auth/drive']))
+    except:
+        return None
 
-# --- УНИВЕРСАЛЬНАЯ СИСТЕМНАЯ ИНСТРУКЦИЯ ---
+drive_service = init_google_drive()
+
+# --- ИНСТРУМЕНТЫ ДЛЯ РАБОТЫ С ДИСКОМ ---
+def read_sync_matrix() -> str:
+    if not drive_service: return "Ошибка: Диск недоступен."
+    try:
+        file_metadata = drive_service.files().get(fileId=MASTER_MATRIX_ID, fields="mimeType").execute()
+        if file_metadata.get('mimeType') == 'application/vnd.google-apps.document':
+            request = drive_service.files().export_media(fileId=MASTER_MATRIX_ID, mimeType='text/plain')
+        else:
+            request = drive_service.files().get_media(fileId=MASTER_MATRIX_ID)
+        return request.execute().decode('utf-8', errors='ignore')
+    except Exception as e:
+        return f"Ошибка чтения матрицы: {e}"
+
+def update_sync_matrix(new_content: str) -> str:
+    if not drive_service: return "Ошибка: Диск недоступен."
+    try:
+        from googleapiclient.http import MediaIoBaseUpload
+        import io
+        fh = io.BytesIO(new_content.encode('utf-8'))
+        media = MediaIoBaseUpload(fh, mimeType='text/plain', resumable=True)
+        drive_service.files().update(fileId=MASTER_MATRIX_ID, media_body=media).execute()
+        return "Центральная матрица успешно обновлена."
+    except Exception as e:
+        return f"Ошибка обновления матрицы: {e}"
+
+def create_or_update_file_in_folder(file_name: str, content: str, folder_block: str) -> str:
+    if not drive_service: return "Ошибка: Диск недоступен."
+    try:
+        from googleapiclient.http import MediaIoBaseUpload
+        import io
+        parent_id = BLOCK_1_FOLDER_ID if folder_block == "block_1" else None
+        
+        query = f"name = '{file_name}' and trashed = false"
+        if parent_id:
+            query += f" and '{parent_id}' in parents"
+        
+        results = drive_service.files().list(q=query, fields="files(id)").execute()
+        files = results.get('files', [])
+        
+        fh = io.BytesIO(content.encode('utf-8'))
+        media = MediaIoBaseUpload(fh, mimeType='text/plain', resumable=True)
+        
+        if files:
+            file_id = files[0]['id']
+            drive_service.files().update(fileId=file_id, media_body=media).execute()
+            return f"Файл '{file_name}' обновлен в {folder_block}."
+        else:
+            file_metadata = {'name': file_name}
+            if parent_id: file_metadata['parents'] = [parent_id]
+            file = drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+            return f"Создан файл '{file_name}' в {folder_block}."
+    except Exception as e:
+        return f"Ошибка запись: {e}"
+
+# Сводка матрицы
+if st.session_state.matrix_summary == "⏱️ Читаю матрицу проекта...":
+    matrix_data = read_sync_matrix()
+    if "Ошибка" in matrix_data:
+        st.session_state.matrix_summary = matrix_data
+    else:
+        try:
+            summary_model = genai.GenerativeModel('gemini-2.5-pro')
+            response = summary_model.generate_content(f"Сделай сухую выжимку текущей позиции в структуре 800 серий на основе матрицы: {matrix_data}")
+            st.session_state.matrix_summary = response.text
+        except Exception as e:
+            st.session_state.matrix_summary = f"Ошибка разбора матрицы: {e}"
+    st.rerun()
+
+with st.sidebar:
+    st.info(st.session_state.matrix_summary)
+
+# --- ГЛАВНЫЙ ЧАТ ---
+st.title("Obsidian Essence: Мозг Студии")
+
+# ИНСТРУКЦИЯ С УЧЕТОМ СЫРЫХ КАДРОВ ПО 8 СЕКУНД ПОД ОБРЕЗКУ
 SYSTEM_INSTRUCTION = f"""
-Ты — Универсальный Архитектор Студии 'Obsidian Essence'. Ты владеешь полным стеком производства:
-1. СЮЖЕТ: 800 серий, 4 зоны, 5 локаций, 5 суток, 8 серий в сутки. Тайминг 30 сек (из 4-х частей по 8 сек). Непрерывность сюжета — абсолют.
-2. ВИЗУАЛ (PixVerse): Ты — мастер промптов. Ты знаешь, как сохранять визуальную консистентность через 'Extend'. Ты всегда учитываешь Visual Anchor (последний кадр) для бесшовного стыка.
-3. МОНТАЖ (CapCut): Ты понимаешь ритм, жесткие склейки и работу с переходами.
-4. АЛГОРИТМ РАБОТЫ (100% результат):
-   - ПЕРВОЕ: Анализ данных (чтение матрицы и описания локации из файлов).
-   - ВТОРОЕ: Синтез решения (связка сюжета + визуальный промпт для PixVerse).
-   - ТРЕТЬЕ: Верификация (проверка на отсутствие ошибок и логических разрывов).
-   - ЧЕТВЕРТОЕ: Выдача результата (Промпт + Сценарное действие + Технические указания).
+Ты — Мозг Студии 'Obsidian Essence', Operational Director и Главный Архитектор непрерывного сериала на 800 серий.
+Ты управляешь папками 'root' и 'block_1' (01 структур планинг).
 
-Герой — невидимый наблюдатель (видна только рука при контакте с миром). 
-Твои промпты для PixVerse должны быть инженерно-точными (стиль, свет, движение, консистентность). 
-Никакой импровизации — только 100% анализ в Облаке и выдача готового решения.
+СТРОГАЯ МАТЕМАТИКА СЕРИАЛА:
+- Структура: 4 климатические зоны • 5 локаций в зоне • 5 суток на локацию • 8 серий в сутки. Всего 800 серий.
+- Каждая серия состоит из 4 частей. Каждая часть — это исходный видеофрагмент СТРОГО по 8 секунд.
+- Общий хронометраж сырой серии — 32 секунды, но на монтаже они обрезаются и стыкуются, поэтому готовая серия будет короче.
+- При генерации ты объединяешь эти части в 2 монтажных блока:
+  * Блок А (Часть 1 + Часть 2) [исходники по 8 сек] — завязка, динамичное действие.
+  * Блок Б (Часть 3 + Часть 4) [исходники по 8 сек] — кульминация серии и монтажный переход (клиффхэнгер) в следующую серию.
+
+ПРАВИЛО ПЛОТНОСТИ И НЕПРЕРЫВНОСТИ СЮЖЕТА:
+1. Сценарий должен быть абсолютно непрерывным на протяжении всех 800 серий. Конец Блока Б текущей серии — это жесткий стык с началом Блока А следующей серии. Логика не должна теряться.
+2. На каждую 8-секундную часть пиши строго одну емкую визуальную сцену и лаконичный текст/голос, оставляя запас времени по краям кадра для монтажной обрезки.
+3. Перед генерацией читай матрицу (read_sync_matrix). Запрашивай одобрение фразой «Одобрить эти изменения?». Запись делай через create_or_update_file_in_folder.
+
+Сейчас выбран режим: {work_mode}. Отвечай коротко, структурно, как топ-менеджер. Без приветствий.
 """
 
-# (Далее идет стандартная логика chat_input и model.start_chat с указанными инструментами)
+tools_list = [read_sync_matrix, update_sync_matrix, create_or_update_file_in_folder] if work_mode == "Operational Director (С Диском)" else None
+
+model = genai.GenerativeModel(
+    model_name='gemini-2.5-pro',
+    system_instruction=SYSTEM_INSTRUCTION,
+    tools=tools_list
+)
+
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+if prompt := st.chat_input("Введите команду для Мозга..."):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+    
+    with st.chat_message("assistant"):
+        try:
+            st.session_state.request_count += 1
+            chat = model.start_chat(enable_automatic_function_calling=True)
+            response = chat.send_message(prompt)
+            ai_response = response.text
+        except Exception as e:
+            ai_response = f"⚠️ Ошибка: {e}. Если 429 — обнови ключ в панели слева."
+
+        st.markdown(ai_response)
+        st.session_state.messages.append({"role": "assistant", "content": ai_response})
+        st.rerun()
