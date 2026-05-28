@@ -1,3 +1,4 @@
+SpeechRecognition
 streamlit
 google-generativeai
 gTTS
