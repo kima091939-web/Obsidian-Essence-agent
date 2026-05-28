@@ -3,18 +3,20 @@ import google.generativeai as genai
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import io
+from gtts import gTTS
+import base64
 
-# --- ФУНДАМЕНТАЛЬНАЯ ПРОШИВКА ---
+# СИСТЕМНАЯ ПРОШИВКА
 SYSTEM_INSTRUCTION = """
 Ты — Мозг Студии 'Obsidian Essence'. Твоя роль: Operational Director.
 Действуй по Регламенту: 
-- Конкретность, нулевая избыточность.
-- 'Скелет прежде плоти'.
-- Единый Источник Правды: MASTER_SYNC_MATRIX.
-- Любое действие с файлами — только по запросу пользователя.
+- Нулевая избыточность (без приветствий и воды).
+- 'Скелет прежде плоти': сначала анализ структуры/файла, потом рекомендации.
+- Если пользователь просит найти файл, ищи точечно.
+- Если файл прочитан, анализируй его содержимое строго согласно нашим Манифестам.
 """
 
-# --- НАСТРОЙКИ ---
+# Настройка API
 api_key = st.secrets.get("GOOGLE_API_KEY")
 genai.configure(api_key=api_key)
 model = genai.GenerativeModel(model_name='gemini-2.5-flash', system_instruction=SYSTEM_INSTRUCTION)
@@ -29,63 +31,56 @@ def init_google_drive():
 
 drive_service = init_google_drive()
 
+# ФУНКЦИЯ ОЗВУЧКИ
+def speak_text(text):
+    tts = gTTS(text=text, lang='ru')
+    fp = io.BytesIO()
+    tts.write_to_fp(fp)
+    fp.seek(0)
+    audio_bytes = fp.read()
+    b64_audio = base64.b64encode(audio_bytes).decode('utf-8')
+    audio_html = f'<audio autoplay="true" src="data:audio/mp3;base64,{b64_audio}"></audio>'
+    st.markdown(audio_html, unsafe_allow_html=True)
+
 st.set_page_config(page_title="Obsidian Essence", layout="centered")
 st.title("Obsidian Essence: Brain")
 
-# --- ФУНКЦИИ ИНСТРУМЕНТАРИЯ ---
+# ФУНКЦИЯ ЧТЕНИЯ КОНТЕНТА
 def get_file_text(file_id):
     try:
         request = drive_service.files().export_media(fileId=file_id, mimeType='text/plain')
         return request.execute().decode('utf-8')
-    except Exception as e:
-        return f"Ошибка чтения файла: {e}"
-
-def search_files(query):
-    try:
-        results = drive_service.files().list(
-            q=f"name contains '{query}' and trashed=false",
-            fields="files(id, name, mimeType)",
-            pageSize=15
-        ).execute()
-        return results.get('files', [])
     except:
-        return []
+        return "Ошибка: не удалось прочитать этот файл."
 
-# --- ИНТЕРФЕЙС И ЛОГИКА ---
+# ЛОГИКА ПОИСКА И АНАЛИЗА
 if "messages" not in st.session_state: st.session_state.messages = []
 
-# Отрисовка истории
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-
-if prompt := st.chat_input("Введите запрос..."):
+if prompt := st.chat_input("Найти файл или дай команду на анализ..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
     
     with st.chat_message("assistant"):
-        # 1. Точечный поиск
-        if "найди" in prompt.lower():
-            query = prompt.lower().replace("найди", "").strip()
-            files = search_files(query)
+        # Поиск
+        if "найди" in prompt.lower() or "поиск" in prompt.lower():
+            query = prompt.replace("найди", "").replace("поиск", "").strip()
+            files = drive_service.files().list(q=f"name contains '{query}' and trashed=false", fields="files(id, name)").execute().get('files', [])
+            
             if files:
-                response = f"Нашел следующие файлы по запросу '{query}':"
-                for f in files:
-                    response += f"\n- {f['name']} (ID: `{f['id']}`)"
+                response = "Нашел файлы:\n" + "\n".join([f"- {f['name']} (ID: `{f['id']}`)" for f in files])
             else:
-                response = f"Файлы по запросу '{query}' не найдены."
+                response = "Файлы не найдены."
         
-        # 2. Чтение файла для анализа
+        # Чтение
         elif "прочитай" in prompt.lower():
             file_id = prompt.split()[-1].strip("`")
             content = get_file_text(file_id)
             analysis = model.generate_content(f"Проанализируй этот документ согласно регламенту:\n{content}")
             response = analysis.text
         
-        # 3. Базовое общение (Манифест)
         else:
-            res = model.generate_content(prompt)
-            response = res.text
-            
+            response = model.generate_content(prompt).text
+        
         st.markdown(response)
+        speak_text(response) # Звук восстановлен
         st.session_state.messages.append({"role": "assistant", "content": response})
