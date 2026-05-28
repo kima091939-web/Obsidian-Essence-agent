@@ -2,91 +2,194 @@ import streamlit as st
 import google.generativeai as genai
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-import io
 from gtts import gTTS
-import base64
+import PIL.Image
+import docx
+import pypdf
+import os
+import io
 
-# СИСТЕМНАЯ ПРОШИВКА
+# ФУНДАМЕНТАЛЬНАЯ БАЗА ЗНАНИЙ И ПРОШИВКА (БЕЗ ЛИШНИХ ОГРАНИЧЕНИЙ)
 SYSTEM_INSTRUCTION = """
-Ты — Мозг Студии 'Obsidian Essence'. Твоя роль: Operational Director.
-Действуй по Регламенту: 
-- Нулевая избыточность (без приветствий и воды).
-- 'Скелет прежде плоти': сначала анализ структуры/файла, потом рекомендации.
-- Если пользователь просит найти файл, ищи точечно.
-- Если файл прочитан, анализируй его содержимое строго согласно нашим Манифестам.
+Ты — Мозг Студии 'Obsidian Essence'. Твоя роль: Operational Director и Архитектор сюжета.
+Этот регламент является основополагающим и директивным. Любое отклонение — критическая ошибка.
+
+1. ПРИНЦИПЫ ОБЩЕНИЯ И РАБОТЫ:
+- Конкретность: Ответ строго на заданный вопрос.
+- Нулевая избыточность: Запрещены вступления, приветствия, вежливость и пояснения логики без информационной нагрузки.
+- Автономность: Проводи верификацию ответа перед выводом.
+- Протокол фиксации: Вся информация в диалоге является «черновиком» до получения явной команды фиксации («Внеси в правила», «Запомни», «Зафиксируй»).
+
+2. ФИЛОСОФИЯ И ЦЕЛИ ПРОЕКТА (МАНИФЕСТ):
+- Наша цель: Создать новую визуальную реальность, задавая новый мировой стандарт качества для нейросетевых визуальных систем.
+- Бескомпромиссная Реальность: Каждый пиксель подчиняется законам физики. Зритель должен чувствовать вес, плотность и холод объекта через экран.
+- Виральность через Эстетику: Мы создаем тренды. Премиальный визуальный продукт, вызывающий эстетический восторг.
+- Системная Целостность: Все элементы вселенной Obsidian Essence связаны. Сложный, логически выверенный мир.
+- Принцип «Скелет прежде плоти»: Запрещено создание контента до утверждения структуры папок и связей между ними.
+- Принцип Пошаговости: Работа ведется строго линейно.
+- Единый Источник Правды: MASTER_SYNC_MATRIX является центральным документом.
+
+3. МАТРИЦА СИНХРОНИЗАЦИИ (СИСТЕМА GLACIER):
+При анализе или планировании учитывай архитектуру:
+- Блок 0: Foundation (0.1_Concept, 0.2_Time_Regime, 0.3_Visual_Code, 0.4_Sync_Protocol).
+- Блок 1: Physics (1.1_Mass_and_Gravity, 1.2_Structural_Integration, 1.3_Motion_Mechanics, 1.4_Material_Interaction, 1.5_Technical_Specifications, 1.6_Motion_State_Machine, 1.7_Naming_Convention).
 """
 
-# Настройка API
+# 1. Настройка API Gemini
 api_key = st.secrets.get("GOOGLE_API_KEY")
-genai.configure(api_key=api_key)
-model = genai.GenerativeModel(model_name='gemini-2.5-flash', system_instruction=SYSTEM_INSTRUCTION)
+if not api_key:
+    st.error("Ошибка: Ключ GOOGLE_API_KEY не найден в настройках Secrets!")
+    st.stop()
 
+genai.configure(api_key=api_key)
+
+model = genai.GenerativeModel(
+    model_name='gemini-2.5-flash',
+    system_instruction=SYSTEM_INSTRUCTION
+)
+
+# 2. Авторизация в Google Дискове
 @st.cache_resource
 def init_google_drive():
-    creds_info = st.secrets["gcp_service_account"]
-    creds_info_dict = dict(creds_info)
-    creds_info_dict["private_key"] = creds_info_dict["private_key"].replace("\\n", "\n")
-    creds = service_account.Credentials.from_service_account_info(creds_info_dict, scopes=['https://www.googleapis.com/auth/drive'])
-    return build('drive', 'v3', credentials=creds)
+    try:
+        creds_info = st.secrets["gcp_service_account"]
+        creds_info_dict = dict(creds_info)
+        creds_info_dict["private_key"] = creds_info_dict["private_key"].replace("\\n", "\n")
+        scopes = ['https://www.googleapis.com/auth/drive']
+        creds = service_account.Credentials.from_service_account_info(creds_info_dict, scopes=scopes)
+        return build('drive', 'v3', credentials=creds)
+    except Exception as e:
+        st.error(f"Ошибка авторизации Google Drive: {e}")
+        return None
 
 drive_service = init_google_drive()
 
-# ФУНКЦИЯ ОЗВУЧКИ
-def speak_text(text):
-    tts = gTTS(text=text, lang='ru')
-    fp = io.BytesIO()
-    tts.write_to_fp(fp)
-    fp.seek(0)
-    audio_bytes = fp.read()
-    b64_audio = base64.b64encode(audio_bytes).decode('utf-8')
-    audio_html = f'<audio autoplay="true" src="data:audio/mp3;base64,{b64_audio}"></audio>'
-    st.markdown(audio_html, unsafe_allow_html=True)
-
 st.set_page_config(page_title="Obsidian Essence", layout="centered")
-st.title("Obsidian Essence: Brain")
+st.title("Obsidian Essence: Studio Brain")
 
-# ФУНКЦИЯ ЧТЕНИЯ КОНТЕНТА
-def get_file_text(file_id):
+# Функция РЕКУРСИВНОГО глубокого сканирования папок и подпапок
+def display_folder_tree(service, folder_id, level=0):
     try:
-        request = drive_service.files().export_media(fileId=file_id, mimeType='text/plain')
-        return request.execute().decode('utf-8')
-    except:
-        return "Ошибка: не удалось прочитать этот файл."
+        query = f"'{folder_id}' in parents and trashed=false"
+        results = service.files().list(
+            q=query,
+            fields="files(id, name, mimeType)",
+            pageSize=50
+        ).execute()
+        items = results.get('files', [])
+        
+        indent = "  " * level
+        for item in items:
+            if item['mimeType'] == 'application/vnd.google-apps.folder':
+                st.markdown(f"{indent}📁 **{item['name']}**")
+                display_folder_tree(service, item['id'], level + 1)
+            else:
+                st.write(f"{indent}└ 📄 {item['name']}")
+    except Exception:
+        pass
 
-# ЛОГИКА ПОИСКА И АНАЛИЗА
-if "messages" not in st.session_state: st.session_state.messages = []
+# Сканирование структуры главных папок
+def scan_studio_structure(service):
+    if not service:
+        return
+    try:
+        results = service.files().list(
+            q="mimeType='application/vnd.google-apps.folder' and trashed=false",
+            fields="files(id, name)"
+        ).execute()
+        all_folders = results.get('files', [])
+        
+        found_any = False
+        for folder in all_folders:
+            clean_name = folder['name'].replace('"', '').replace("'", "").strip()
+            
+            if clean_name in ['_SYSTEM_SYNC_', 'Obsidian Essence']:
+                if not found_any:
+                    st.success("🤖 Синхронизация с облаком активна!")
+                    found_any = True
+                
+                st.markdown(f"---")
+                st.markdown(f"🗂️ **КОРЕНЬ: {folder['name']}**")
+                display_folder_tree(service, folder['id'], level=1)
+                    
+        if not found_any:
+            st.warning("⚠️ Структурные папки проекта не обнаружены на Диске.")
+    except Exception as e:
+        st.error(f"Ошибка чтения структуры: {e}")
 
-if prompt := st.chat_input("Найти файл или дай команду на анализ..."):
+# Вывод структуры в боковую панель
+with st.sidebar:
+    st.header("Архитектура проекта")
+    if drive_service:
+        scan_studio_structure(drive_service)
+    if st.button("🔄 Обновить данные"):
+        st.rerun()
+
+# Настройка истории чата
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+def process_file(file):
+    try:
+        if file.type.startswith('image/'): 
+            return PIL.Image.open(file)
+        elif file.type == "application/pdf": 
+            reader = pypdf.PdfReader(file)
+            return "\n".join([page.extract_text() for page in reader.pages])
+        elif "wordprocessingml" in file.type:
+            doc = docx.Document(file)
+            return "\n".join([para.text for para in doc.paragraphs])
+        else:
+            return file.getvalue().decode("utf-8")
+    except Exception as e:
+        return f"Ошибка обработки файла: {e}"
+
+def speak_text(text):
+    try:
+        tts = gTTS(text=text, lang='ru')
+        fp = io.BytesIO()
+        tts.write_to_fp(fp)
+        fp.seek(0)
+        return fp
+    except Exception as e:
+        st.error(f"Ошибка генерации голоса: {e}")
+        return None
+
+uploaded_file = st.file_uploader("➕ Загрузить файл с устройства", type=['png', 'jpg', 'jpeg', 'docx', 'pdf', 'txt'])
+
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+        if message["role"] == "assistant" and "audio" in message:
+            st.audio(message["audio"], format="audio/mp3")
+
+if prompt := st.chat_input("Введите задачу для Мозга Студии..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"): st.markdown(prompt)
+    with st.chat_message("user"):
+        st.markdown(prompt)
     
     with st.chat_message("assistant"):
-        # Поиск
-        if "найди" in prompt.lower() or "поиск" in prompt.lower():
-            query = prompt.replace("найди", "").replace("поиск", "").strip()
-            # Добавлен параметр supportsAllDrives=True для видимости всех файлов
-            results = drive_service.files().list(
-                q=f"name contains '{query}' and trashed=false", 
-                fields="files(id, name)",
-                supportsAllDrives=True,
-                includeItemsFromAllDrives=True
-            ).execute()
-            files = results.get('files', [])
-            
-            if files:
-                response = "Нашел файлы:\n" + "\n".join([f"- {f['name']} (ID: `{f['id']}`)" for f in files])
+        contents = []
+        if uploaded_file:
+            file_data = process_file(uploaded_file)
+            if isinstance(file_data, PIL.Image.Image):
+                contents.append(file_data)
             else:
-                response = "Файлы не найдены."
+                prompt = f"{prompt}\n\n[Контекст из файла]:\n{file_data}"
         
-        elif "прочитай" in prompt.lower():
-            file_id = prompt.split()[-1].strip("`")
-            content = get_file_text(file_id)
-            analysis = model.generate_content(f"Проанализируй этот документ согласно регламенту:\n{content}")
-            response = analysis.text
-        
-        else:
-            response = model.generate_content(prompt).text
-        
-        st.markdown(response)
-        speak_text(response)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+        contents.append(prompt)
+        try:
+            response = model.generate_content(contents)
+            st.markdown(response.text)
+            
+            audio_data = speak_text(response.text)
+            if audio_data:
+                st.audio(audio_data, format="audio/mp3")
+            
+            st.session_state.messages.append({
+                "role": "assistant", 
+                "content": response.text,
+                "audio": audio_data
+            })
+        except Exception as e:
+            st.error(f"Ошибка API: {e}")
