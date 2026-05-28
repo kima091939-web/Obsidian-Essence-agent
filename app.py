@@ -1,8 +1,11 @@
+
+import streamlit as str_input  # Переименовано во избежание конфликтов
 import streamlit as st
 import google.generativeai as genai
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaIoBaseUpload
 from gtts import gTTS
 import PIL.Image
 import docx
@@ -12,21 +15,21 @@ import io
 import re
 
 # ==========================================
-# 0. КОНФИГУРАЦИЯ И КОНСТАНТЫ
+# 0. КОНФИГУРАЦИЯ АВТОПИЛОТА ИЗ SECRETS
 # ==========================================
-# ВСТАВЬТЕ СЮДА ID ВАШЕГО ГЛАВНОГО ФАЙЛА СИНХРОНИЗАЦИИ (MASTER_SYNC_MATRIX)
-MASTER_MATRIX_ID = "ВАШ_ID_MASTER_SYNC_MATRIX_НА_ДИСКЕ" 
+# Код автоматически забирает ID, который вы только что добавили в Secrets телефона
+MASTER_MATRIX_ID = st.secrets.get("MASTER_MATRIX_ID", "1VoFiHqxgaNN9r1yqTpofL2z0l03WI_R4BGYhnG7rJlI")
 
 # ФУНДАМЕНТАЛЬНАЯ БАЗА ЗНАНИЙ И ПРОШИВКА (БЕЗ ЛИШНИХ ОГРАНИЧЕНИЙ)
 SYSTEM_INSTRUCTION = """
-Ты — Мозг Студии 'Obsidian Essence'. Твоя роль: Operational Director и Архитектор сюжета.
+Ты — Мозг Студии 'Obsidian Essence'. Твоя роль: Operational Director и Автономный Координатор проекта.
 Этот регламент является основополагающим и директивным. Любое отклонение — критическая ошибка.
 
 1. ПРИНЦИПЫ ОБЩЕНИЯ И РАБОТЫ:
 - Конкретность: Ответ строго на заданный вопрос.
 - Нулевая избыточность: Запрещены вступления, приветствия, вежливость и пояснения логики без информационной нагрузки.
 - Автономность: Проводи верификацию ответа перед выводом. Самостоятельно используй доступные инструменты работы с Диском (поиск, чтение файлов), если запрос пользователя требует актуальных данных по проекту.
-- Протокол фиксации: Вся информация в диалоге является «черновиком» до получения явной команды фиксации («Внеси в правила», «Запомни», «Зафиксируй»).
+- Протокол фиксации: Вся информация в диалоге является «черновиком» до получения явной команды фиксации («Внеси в правила», «Запомни», «Зафиксируй»). Если в диалоге утверждено новое решение, изменен статус задачи — ты обязан СРАЗУ самостоятельно обновить центральный документ на Диске, вызвав инструмент `update_sync_matrix`. Не жди, пока пользователь попросит тебя записать это вручную.
 
 2. ФИЛОСОФИЯ И ЦЕЛИ ПРОЕКТА (МАНИФЕСТ):
 - Наша цель: Создать новую визуальную реальность, задавая новый мировой стандарт качества для нейросетевых визуальных систем.
@@ -72,171 +75,126 @@ def init_google_drive():
 drive_service = init_google_drive()
 
 # ==========================================
-# 3. ИНСТРУМЕНТЫ (TOOLS) ДЛЯ АВТОНОМНОГО ИИ
+# 3. ИНСТРУМЕНТЫ АВТОМАШИНЫ (TOOLS) ДЛЯ GEMINI
 # ==========================================
 def search_files_by_name(query: str) -> str:
-    """Ищет файлы на Google Диске по названию или его части. Возвращает список совпадений с их ID."""
-    if not drive_service:
-        return "Ошибка: Подключение к Google Диске отсутствует."
+    """Ищет файлы на Google Диске по названию или его части."""
+    if not drive_service: return "Ошибка: Диск недоступен."
     try:
         q_query = f"(name contains '{query}' or name contains '{query.lower()}') and trashed=false"
-        results = drive_service.files().list(
-            q=q_query,
-            fields="files(id, name)",
-            pageSize=10
-        ).execute(num_retries=3)
+        results = drive_service.files().list(q=q_query, fields="files(id, name)", pageSize=10).execute()
         files = results.get('files', [])
-        
-        if not files:
-            return f"Файлы по запросу '{query}' на Диске не найдены."
-        return "Результаты поиска на Диске:\n" + "\n".join([f"- {f['name']} (ID: `{f['id']}`)" for f in files])
-    except Exception as e:
-        return f"Не удалось выполнить поиск на Диске: {e}"
+        if not files: return f"Файлы по запросу '{query}' не найдены."
+        return "Результаты поиска:\n" + "\n".join([f"- {f['name']} (ID: `{f['id']}`)" for f in files])
+    except Exception as e: return f"Ошибка поиска: {e}"
 
 def read_file_content(file_id: str) -> str:
-    """Считывает и возвращает текстовое содержимое файла с Google Диска по его ID (поддерживает txt и Google Документы)."""
-    if not drive_service:
-        return "Ошибка: Подключение к Google Диске отсутствует."
+    """Считывает текстовое содержимое файла или Google Документа по его ID."""
+    if not drive_service: return "Ошибка: Диск недоступен."
     try:
         file_metadata = drive_service.files().get(fileId=file_id, fields="mimeType, name").execute()
         mime_type = file_metadata.get('mimeType')
-        
         if mime_type == 'application/vnd.google-apps.document':
             request = drive_service.files().export_media(fileId=file_id, mimeType='text/plain')
         else:
             request = drive_service.files().get_media(fileId=file_id)
-            
-        file_bytes = request.execute()
-        content = file_bytes.decode('utf-8', errors='ignore')
-        return f"--- Содержимое файла '{file_metadata.get('name')}' ---\n{content}\n--- Конец файла ---"
-    except Exception as e:
-        return f"Не удалось прочитать содержимое файла {file_id}: {e}"
+        return request.execute().decode('utf-8', errors='ignore')
+    except Exception as e: return f"Ошибка чтения файла {file_id}: {e}"
 
 def read_sync_matrix() -> str:
-    """Автоматически считывает содержимое главного файла синхронизации MASTER_SYNC_MATRIX."""
-    if MASTER_MATRIX_ID == "ВАШ_ID_MASTER_SYNC_MATRIX_НА_ДИСКЕ":
-        return "Ошибка: В коде приложения не задан ID для MASTER_SYNC_MATRIX. Задайте MASTER_MATRIX_ID."
+    """Автоматически считывает содержимое центральной матрицы MASTER_SYNC_MATRIX."""
+    if not MASTER_MATRIX_ID or MASTER_MATRIX_ID == "ВАШ_ID_MASTER_SYNC_MATRIX_НА_ДИСКЕ":
+        return "Критическая ошибка: В Secrets не настроен MASTER_MATRIX_ID."
     return read_file_content(MASTER_MATRIX_ID)
 
-# Инициализация модели со встроенным списком инструментов
+def update_sync_matrix(new_content: str) -> str:
+    """Полностью обновляет содержимое файла MASTER_SYNC_MATRIX новыми логами и статусами."""
+    if not drive_service: return "Ошибка: Диск недоступен."
+    if not MASTER_MATRIX_ID or MASTER_MATRIX_ID == "ВАШ_ID_MASTER_SYNC_MATRIX_НА_ДИСКЕ":
+        return "Критическая ошибка: В Secrets не настроен MASTER_MATRIX_ID."
+    try:
+        text_stream = io.BytesIO(new_content.encode('utf-8'))
+        media = MediaIoBaseUpload(text_stream, mimeType='text/plain', resumable=True)
+        drive_service.files().update(fileId=MASTER_MATRIX_ID, media_body=media).execute()
+        return "Системное уведомление: Документ MASTER_SYNC_MATRIX успешно обновлен ИИ."
+    except Exception as e:
+        return f"Критический сбой при обновлении матрицы на Диске: {e}"
+
+# Инициализация Gemini с подключением функций автоматизации
 model = genai.GenerativeModel(
     model_name='gemini-2.5-flash',
     system_instruction=SYSTEM_INSTRUCTION,
-    tools=[search_files_by_name, read_file_content, read_sync_matrix]
+    tools=[search_files_by_name, read_file_content, read_sync_matrix, update_sync_matrix]
 )
 
 # ==========================================
-# 4. ИНТЕРФЕЙС И ЛОГИКА STREAMLIT
+# 4. ИНТЕРФЕЙС STREAMLIT
 # ==========================================
 st.set_page_config(page_title="Obsidian Essence", layout="centered")
-st.title("Obsidian Essence: Studio Brain")
+st.title("Obsidian Essence: Autopilot Brain v3")
 
-# Box Панель
 with st.sidebar:
     st.header("Архитектура проекта")
-    st.markdown("🤖 Мозг Obsidian Essence активен.")
-    st.markdown("Поиск файлов и чтение структуры теперь полностью автоматизированы через ИИ.")
+    st.markdown("🤖 Мозг Obsidian Essence переведен на АВТОПИЛОТ.")
+    st.markdown("Контроль контекста, синхронизация и логгирование выполняются ИИ автоматически.")
 
-# Настройка истории чата
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-if "file_uploader_key" not in st.session_state:
-    st.session_state.file_uploader_key = "file_uploader_0"
+if "messages" not in st.session_state: st.session_state.messages = []
+if "file_uploader_key" not in st.session_state: st.session_state.file_uploader_key = "file_uploader_0"
 
 def process_file(file):
     try:
-        if file.type.startswith('image/'): 
-            return PIL.Image.open(file)
+        if file.type.startswith('image/'): return PIL.Image.open(file)
         elif file.type == "application/pdf": 
-            reader = pypdf.PdfReader(file)
-            return "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+            return "\n".join([p.extract_text() for p in pypdf.PdfReader(file).pages if p.extract_text()])
         elif "wordprocessingml" in file.type:
-            doc = docx.Document(file)
-            return "\n".join([para.text for para in doc.paragraphs])
-        else:
-            return file.getvalue().decode("utf-8")
-    except Exception as e:
-        return f"Ошибка обработки файла: {e}"
+            return "\n".join([p.text for p in docx.Document(file).paragraphs])
+        else: return file.getvalue().decode("utf-8")
+    except Exception as e: return f"Ошибка обработки: {e}"
 
 def speak_text(text):
     try:
-        # Убираем разметку, чтобы робот не читал вслух спецсимволы
         clean_text = re.sub(r'[*_`#\-]', '', text)
-        if len(clean_text) > 300:
-            clean_text = clean_text[:300] + "... Текст сокращен для аудио."
-            
+        if len(clean_text) > 300: clean_text = clean_text[:300] + "... Контроль процесса завершен."
         tts = gTTS(text=clean_text, lang='ru')
         fp = io.BytesIO()
         tts.write_to_fp(fp)
-        return fp.getvalue()  # Возвращаем байты для хранения в сессии
-    except Exception as e:
-        st.error(f"Ошибка генерации голоса: {e}")
-        return None
+        return fp.getvalue()
+    except: return None
 
-uploaded_file = st.file_uploader(
-    "➕ Загрузить файл с устройства", 
-    type=['png', 'jpg', 'jpeg', 'docx', 'pdf', 'txt'],
-    key=st.session_state.file_uploader_key
-)
+uploaded_file = st.file_uploader("➕ Загрузить локальный файл", type=['png', 'jpg', 'jpeg', 'docx', 'pdf', 'txt'], key=st.session_state.file_uploader_key)
 
-# Отображение истории чата
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
         if message["role"] == "assistant" and message.get("audio"):
             st.audio(message["audio"], format="audio/mp3")
 
-# Поле ввода запроса пользователя
-if prompt := st.chat_input("Введите задачу для Мозга Студии..."):
+if prompt := st.chat_input("Введите текущую задачу, статус или команду..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    with st.chat_message("user"): st.markdown(prompt)
     
     with st.chat_message("assistant"):
         contents = []
-        
-        # Если загружен локальный файл, извлекаем контент
         if uploaded_file:
             file_data = process_file(uploaded_file)
-            if isinstance(file_data, PIL.Image.Image):
-                contents.append(file_data)
-            else:
-                prompt = f"{prompt}\n\n[Контекст из файла]:\n{file_data}"
-            
-            # Меняем ключ виджета для его очистки на следующем шаге
+            if isinstance(file_data, PIL.Image.Image): contents.append(file_data)
+            else: prompt = f"{prompt}\n\n[Входной контекст]:\n{file_data}"
             st.session_state.file_uploader_key = f"file_uploader_{st.session_state.file_uploader_key.split('_')[-1]}"
         
         contents.append(prompt)
         
         try:
-            # Запускаем чат с поддержкой автоматического вызова инструментов
+            # Запуск автономного чата с вызовом Python-функций на лету
             chat = model.start_chat(enable_automatic_function_calling=True)
             response = chat.send_message(contents)
             ai_response = response.text
         except Exception as e:
-            error_message = str(e)
-            if "429" in error_message or "Quota" in error_message:
-                ai_response = "⏳ Лимит запросов к ИИ временно исчерпан. Пожалуйста, подождите 30 секунд и повторите команду."
-            else:
-                ai_response = f"Сбой системы при генерации ответа: {e}"
+            ai_response = f"Критический сбой управляющей системы: {e}"
 
-        # Вывод текста ответа в интерфейс
         st.markdown(ai_response)
-        
-        # Генерация аудиофайла из ответа
         audio_bytes = speak_text(ai_response)
-        if audio_bytes:
-            st.audio(audio_bytes, format="audio/mp3")
+        if audio_bytes: st.audio(audio_bytes, format="audio/mp3")
         
-        # Сохранение в историю сессии
-        st.session_state.messages.append({
-            "role": "assistant", 
-            "content": ai_response,
-            "audio": audio_bytes
-        })
-        
-        # Принудительный реран для очистки поля file_uploader
+        st.session_state.messages.append({"role": "assistant", "content": ai_response, "audio": audio_bytes})
         st.rerun()
-
 
