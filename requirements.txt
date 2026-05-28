@@ -1,6 +1,6 @@
+
 streamlit
 google-generativeai
 gTTS
 python-docx
 pypdf
-
