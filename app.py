@@ -8,12 +8,6 @@ import docx
 import pypdf
 import os
 import io
-import time
-import hashlib
-import json
-from datetime import datetime, timedelta
-from typing import Optional, Any
-import functools
 
 # ФУНДАМЕНТАЛЬНАЯ БАЗА ЗНАНИЙ И ПРОШИВКА (БЕЗ ЛИШНИХ ОГРАНИЧЕНИЙ)
 SYSTEM_INSTRUCTION = """
@@ -41,87 +35,20 @@ SYSTEM_INSTRUCTION = """
 - Блок 1: Physics (1.1_Mass_and_Gravity, 1.2_Structural_Integration, 1.3_Motion_Mechanics, 1.4_Material_Interaction, 1.5_Technical_Specifications, 1.6_Motion_State_Machine, 1.7_Naming_Convention).
 """
 
-# ==================== КОНФИГУРАЦИЯ RETRY И КЭШИРОВАНИЯ ====================
-MAX_RETRY_ATTEMPTS = 5
-INITIAL_RETRY_DELAY = 2
-MAX_RETRY_DELAY = 60
-CACHE_TTL_HOURS = 24
-
-# ==================== 1. НАСТРОЙКА API GEMINI ====================api_key = st.secrets.get("GOOGLE_API_KEY")
+# 1. Настройка API Gemini
+api_key = st.secrets.get("GOOGLE_API_KEY")
 if not api_key:
     st.error("Ошибка: Ключ GOOGLE_API_KEY не найден в настройках Secrets!")
     st.stop()
 
 genai.configure(api_key=api_key)
 
-# ==================== 2. СИСТЕМА КЭШИРОВАНИЯ ====================
-@st.cache_data(ttl=CACHE_TTL_HOURS * 3600)
-def get_cached_response_hash(prompt_hash: str) -> Optional[str]:
-    cache_file = f".cache_{prompt_hash}.json"
-    try:
-        if os.path.exists(cache_file):
-            with open(cache_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                cache_time = datetime.fromisoformat(data['timestamp'])
-                if datetime.now() - cache_time < timedelta(hours=CACHE_TTL_HOURS):
-                    return data['response']
-    except Exception:
-        pass
-    return None
+model = genai.GenerativeModel(
+    model_name='gemini-2.5-flash',
+    system_instruction=SYSTEM_INSTRUCTION
+)
 
-def save_to_cache(prompt_hash: str, response: str):
-    try:
-        cache_file = f".cache_{prompt_hash}.json"
-        with open(cache_file, 'w', encoding='utf-8') as f:
-            json.dump({
-                'response': response,
-                'timestamp': datetime.now().isoformat()
-            }, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-
-def generate_prompt_hash(prompt: str, contents: list) -> str:
-    content_str = str(contents) + str(prompt)
-    return hashlib.md5(content_str.encode('utf-8')).hexdigest()
-
-# ==================== 3. RETRY С ЭКСПОНЕНЦИАЛЬНОЙ ЗАДЕРЖКОЙ ====================
-def exponential_backoff_retry(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        last_exception = None
-        for attempt in range(MAX_RETRY_ATTEMPTS):
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                last_exception = e
-                error_str = str(e).lower()
-                if '429' in error_str or 'quota' in error_str or 'rate limit' in error_str:
-                    retry_delay = min(INITIAL_RETRY_DELAY * (2 ** attempt), MAX_RETRY_DELAY)                    if attempt < MAX_RETRY_ATTEMPTS - 1:
-                        progress_bar = st.progress(0)
-                        status_text = st.empty()
-                        for i in range(int(retry_delay)):
-                            progress_bar.progress((i + 1) / retry_delay)
-                            status_text.warning(
-                                f"⏳ Лимит запросов. Попытка {attempt + 1}/{MAX_RETRY_ATTEMPTS} "
-                                f"через {retry_delay - i} сек..."
-                            )
-                            time.sleep(1)
-                        progress_bar.empty()
-                        status_text.empty()
-                        continue
-                else:
-                    raise e
-        error_msg = f"Не удалось выполнить запрос после {MAX_RETRY_ATTEMPTS} попыток. "
-        if '429' in str(last_exception).lower():
-            error_msg += "Превышена квота API. Подождите или обновите тариф."
-        raise Exception(error_msg)
-    return wrapper
-
-@exponential_backoff_retry
-def generate_content_with_retry(model, contents):
-    return model.generate_content(contents)
-
-# ==================== 4. ИНИЦИАЛИЗАЦИЯ GOOGLE DRIVE ====================
+# 2. Авторизация в Google Дискове
 @st.cache_resource
 def init_google_drive():
     try:
@@ -137,17 +64,21 @@ def init_google_drive():
 
 drive_service = init_google_drive()
 
-# ==================== 5. НАСТРОЙКА STREAMLIT ====================
 st.set_page_config(page_title="Obsidian Essence", layout="centered")
 st.title("Obsidian Essence: Studio Brain")
 
-# ==================== 6. ФУНКЦИИ РАБОТЫ С ФАЙЛАМИ ====================
+# Функция РЕКУРСИВНОГО глубокого сканирования папок и подпапок
 def display_folder_tree(service, folder_id, level=0):
     try:
         query = f"'{folder_id}' in parents and trashed=false"
-        results = service.files().list(            q=query, fields="files(id, name, mimeType)", pageSize=50
-        ).execute()
+        # ИСПРАВЛЕНИЕ: Добавлено execute(num_retries=3) для предотвращения BrokenPipeError
+        results = service.files().list(
+            q=query,
+            fields="files(id, name, mimeType)",
+            pageSize=50
+        ).execute(num_retries=3)
         items = results.get('files', [])
+        
         indent = "  " * level
         for item in items:
             if item['mimeType'] == 'application/vnd.google-apps.folder':
@@ -158,44 +89,53 @@ def display_folder_tree(service, folder_id, level=0):
     except Exception:
         pass
 
+# Сканирование структуры главных папок
 def scan_studio_structure(service):
     if not service:
         return
     try:
+        # ИСПРАВЛЕНИЕ: Добавлено execute(num_retries=3) для предотвращения BrokenPipeError
         results = service.files().list(
             q="mimeType='application/vnd.google-apps.folder' and trashed=false",
             fields="files(id, name)"
-        ).execute()
+        ).execute(num_retries=3)
         all_folders = results.get('files', [])
+        
         found_any = False
         for folder in all_folders:
             clean_name = folder['name'].replace('"', '').replace("'", "").strip()
+            
             if clean_name in ['_SYSTEM_SYNC_', 'Obsidian Essence']:
                 if not found_any:
                     st.success("🤖 Синхронизация с облаком активна!")
                     found_any = True
-                st.markdown("---")
+                
+                st.markdown(f"---")
                 st.markdown(f"🗂️ **КОРЕНЬ: {folder['name']}**")
                 display_folder_tree(service, folder['id'], level=1)
+                    
         if not found_any:
             st.warning("⚠️ Структурные папки проекта не обнаружены на Диске.")
     except Exception as e:
         st.error(f"Ошибка чтения структуры: {e}")
 
+# Вывод структуры в боковую панель
 with st.sidebar:
     st.header("Архитектура проекта")
     if drive_service:
         scan_studio_structure(drive_service)
     if st.button("🔄 Обновить данные"):
         st.rerun()
-    st.markdown("---")
-    st.info("**📊 Лимиты API:**\n- Free: 15 req/min\n- Auto-retry on 429\n- Cache: 24h")
 
-# ==================== 7. ОБРАБОТКА ФАЙЛОВ ====================
+# Настройка истории чата
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
 def process_file(file):
     try:
-        if file.type.startswith('image/'):            return PIL.Image.open(file)
-        elif file.type == "application/pdf":
+        if file.type.startswith('image/'): 
+            return PIL.Image.open(file)
+        elif file.type == "application/pdf": 
             reader = pypdf.PdfReader(file)
             return "\n".join([page.extract_text() for page in reader.pages])
         elif "wordprocessingml" in file.type:
@@ -217,11 +157,7 @@ def speak_text(text):
         st.error(f"Ошибка генерации голоса: {e}")
         return None
 
-# ==================== 8. ИСТОРИЯ ЧАТА ====================
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-uploaded_file = st.file_uploader("➕ Загрузить файл", type=['png', 'jpg', 'jpeg', 'docx', 'pdf', 'txt'])
+uploaded_file = st.file_uploader("➕ Загрузить файл с устройства", type=['png', 'jpg', 'jpeg', 'docx', 'pdf', 'txt'])
 
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
@@ -229,12 +165,11 @@ for message in st.session_state.messages:
         if message["role"] == "assistant" and "audio" in message:
             st.audio(message["audio"], format="audio/mp3")
 
-# ==================== 9. ОБРАБОТКА ЗАПРОСОВ ====================
 if prompt := st.chat_input("Введите задачу для Мозга Студии..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
-
+    
     with st.chat_message("assistant"):
         contents = []
         if uploaded_file:
@@ -243,41 +178,27 @@ if prompt := st.chat_input("Введите задачу для Мозга Сту
                 contents.append(file_data)
             else:
                 prompt = f"{prompt}\n\n[Контекст из файла]:\n{file_data}"
+        
         contents.append(prompt)
-        prompt_hash = generate_prompt_hash(prompt, contents)
-        cached_response = get_cached_response_hash(prompt_hash)
-
         try:
-            if cached_response:
-                st.info("♻️ Ответ взят из кэша")
-                response_text = cached_response
-            else:
-                model = genai.GenerativeModel(
-                    model_name='gemini-1.5-flash',
-                    system_instruction=SYSTEM_INSTRUCTION
-                )
-                with st.spinner("🧠 Мозг Студии обрабатывает запрос..."):
-                    response = generate_content_with_retry(model, contents)
-                    response_text = response.text
-                save_to_cache(prompt_hash, response_text)
-
-            st.markdown(response_text)
-            audio_data = speak_text(response_text)
+            response = model.generate_content(contents)
+            st.markdown(response.text)
+            
+            audio_data = speak_text(response.text)
             if audio_data:
                 st.audio(audio_data, format="audio/mp3")
-
+            
             st.session_state.messages.append({
-                "role": "assistant",
-                "content": response_text,
+                "role": "assistant", 
+                "content": response.text,
                 "audio": audio_data
             })
-
+        # ИСПРАВЛЕНИЕ: Мягкая обработка ошибки 429 и других сетевых сбоев
         except Exception as e:
             error_message = str(e)
-            st.error(f"❌ {error_message}")
-            if '429' in error_message or 'quota' in error_message.lower():
-                st.warning("**Рекомендации:**\n1. Подождите 1-2 минуты\n2. Используйте кэш\n3. Обновите тариф: https://ai.google.dev/pricing")
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": f"Произошла ошибка: {error_message}"
-            })
+            if "429" in error_message or "Quota" in error_message:
+                st.warning("⏳ Лимит запросов к ИИ временно исчерпан (Ошибка 429). Пожалуйста, подождите 30 секунд и попробуйте снова.")
+            elif "BrokenPipe" in error_message:
+                st.warning("📡 Соединение было разорвано. Пожалуйста, повторите запрос.")
+            else:
+                st.error(f"Сбой системы: {e}")
