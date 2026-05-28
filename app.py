@@ -11,7 +11,7 @@ import io
 
 # СИСТЕМНАЯ ПРОШИВКА (Золотое сечение / Золотой стандарт)
 SYSTEM_INSTRUCTION = """
-Ты — Мозг Студии 'Obsidian Essence'. Твоя роль: Операционный директор и Архитектор сюжета.
+Ты — Мозг Студии 'Obsidian Essence'. Твоя роль: Operational Director и Архитектор сюжета.
 ДИРЕКТИВЫ:
 1. АУДИТ: Работаешь строго по 'GOLD_STANDARD_CHECKLIST_GLACIER'.
 2. САНКЦИИ: Вносишь изменения ТОЛЬКО после команды 'Да', 'Согласен', 'Фиксируй'.
@@ -26,19 +26,16 @@ if not api_key:
 
 genai.configure(api_key=api_key)
 
-# Инициализация модели Gemini 2.5 Flash
 model = genai.GenerativeModel(
     model_name='gemini-2.5-flash',
     system_instruction=SYSTEM_INSTRUCTION
 )
 
-# 2. Авторизация в Google Дискове через Сервисный аккаунт
+# 2. Авторизация в Google Дискове
 @st.cache_resource
 def init_google_drive():
     try:
-        # Извлекаем данные из Streamlit Secrets
         creds_info = st.secrets["gcp_service_account"]
-        # Превращаем приватный ключ с \n обратно в корректные переносы строк
         creds_info_dict = dict(creds_info)
         creds_info_dict["private_key"] = creds_info_dict["private_key"].replace("\\n", "\n")
         
@@ -54,37 +51,61 @@ drive_service = init_google_drive()
 st.set_page_config(page_title="Obsidian Essence", layout="centered")
 st.title("Obsidian Essence: Studio Brain")
 
-# Функция проверки папок на Диске
-def check_studio_folders(service):
+# Функция получения файлов из конкретной папки
+def get_files_in_folder(service, folder_id):
+    try:
+        query = f"'{folder_id}' in parents and trashed=false"
+        results = service.files().list(
+            q=query,
+            fields="files(id, name, mimeType)",
+            pageSize=20
+        ).execute()
+        return results.get('files', [])
+    except Exception:
+        return []
+
+# Главная функция сканирования структуры студии (с учётом кавычек)
+def scan_studio_structure(service):
     if not service:
         return
     try:
-        # Ищем наши папки на диске
-        results = service.files().list(
-            q="mimeType='application/vnd.google-apps.folder' and (name='_SYSTEM_SYNC_' or name='Obsidian Essence') and trashed=false",
-            fields="files(id, name)"
-        ).execute()
+        # Учитываем варианты с кавычками и без
+        query = (
+            "mimeType='application/vnd.google-apps.folder' and "
+            "(name='_SYSTEM_SYNC_' or name='Obsidian Essence' or name='\"Obsidian Essence\"') and "
+            "trashed=false"
+        )
+        results = service.files().list(q=query, fields="files(id, name)").execute()
         folders = results.get('files', [])
         
         if folders:
-            st.success(f"🤖 Подключение к Google Диску активно. Доступные папки проекта:")
-            for f in folders:
-                st.write(f"📁 {f['name']} (ID: {f['id']})")
+            st.success("🤖 Синхронизация с Google Диском активна!")
+            for folder in folders:
+                st.markdown(f"📁 **{folder['name']}**")
+                # Читаем файлы внутри этой папки
+                files = get_files_in_folder(service, folder['id'])
+                if files:
+                    for f in files:
+                        st.write(f"└ 📄 {f['name']}")
+                else:
+                    st.caption("   *(Папка пуста)*")
         else:
-            st.warning("⚠️ Внимание: Папки '_SYSTEM_SYNC_' или 'Obsidian Essence' не найдены. Убедитесь, что вы открыли к ним доступ для Email бота!")
+            st.warning("⚠️ Структурные папки проекта не обнаружены на Диске.")
     except Exception as e:
-        st.error(f"Ошибка чтения Диска: {e}")
+        st.error(f"Ошибка чтения структуры: {e}")
 
-# Отображаем статус подключения к диску в боковой панели
+# Вывод структуры в боковую панель
 with st.sidebar:
-    st.header("Синхронизация")
+    st.header("Архитектура проекта")
     if drive_service:
-        check_studio_folders(drive_service)
+        scan_studio_structure(drive_service)
+    if st.button("🔄 Обновить данные"):
+        st.rerun()
 
+# Настройка истории чата
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Функции обработки файлов
 def process_file(file):
     try:
         if file.type.startswith('image/'): 
@@ -100,7 +121,6 @@ def process_file(file):
     except Exception as e:
         return f"Ошибка обработки файла: {e}"
 
-# Функция для генерации озвучки
 def speak_text(text):
     try:
         tts = gTTS(text=text, lang='ru')
@@ -112,17 +132,14 @@ def speak_text(text):
         st.error(f"Ошибка генерации голоса: {e}")
         return None
 
-# Интерфейс загрузки файлов
-uploaded_file = st.file_uploader("➕ Загрузить файл", type=['png', 'jpg', 'jpeg', 'docx', 'pdf', 'txt'])
+uploaded_file = st.file_uploader("➕ Загрузить файл с устройства", type=['png', 'jpg', 'jpeg', 'docx', 'pdf', 'txt'])
 
-# Отображение истории чата
-for i, message in enumerate(st.session_state.messages):
+for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
         if message["role"] == "assistant" and "audio" in message:
             st.audio(message["audio"], format="audio/mp3")
 
-# Поле ввода запроса
 if prompt := st.chat_input("Введите задачу для Мозга Студии..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
