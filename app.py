@@ -9,7 +9,7 @@ import pypdf
 import os
 import io
 
-# СИСТЕМНАЯ ПРОШИВКА (Золотое сечение / Золотой стандарт)
+# СИСТЕМНАЯ ПРОШИВКА (Золотой стандарт)
 SYSTEM_INSTRUCTION = """
 Ты — Мозг Студии 'Obsidian Essence'. Твоя роль: Operational Director и Архитектор сюжета.
 ДИРЕКТИВЫ:
@@ -51,46 +51,52 @@ drive_service = init_google_drive()
 st.set_page_config(page_title="Obsidian Essence", layout="centered")
 st.title("Obsidian Essence: Studio Brain")
 
-# Функция получения файлов из конкретной папки
+# Функция получения файлов из папки
 def get_files_in_folder(service, folder_id):
     try:
         query = f"'{folder_id}' in parents and trashed=false"
         results = service.files().list(
             q=query,
             fields="files(id, name, mimeType)",
-            pageSize=20
+            pageSize=30
         ).execute()
         return results.get('files', [])
     except Exception:
         return []
 
-# Главная функция сканирования структуры студии (с учётом кавычек)
+# Безопасное сканирование структуры (очищаем кавычки программно)
 def scan_studio_structure(service):
     if not service:
         return
     try:
-        # Учитываем варианты с кавычками и без
-        query = (
-            "mimeType='application/vnd.google-apps.folder' and "
-            "(name='_SYSTEM_SYNC_' or name='Obsidian Essence' or name='\"Obsidian Essence\"') and "
-            "trashed=false"
-        )
-        results = service.files().list(q=query, fields="files(id, name)").execute()
-        folders = results.get('files', [])
+        # Запрашиваем папки, доступные бону
+        results = service.files().list(
+            q="mimeType='application/vnd.google-apps.folder' and trashed=false",
+            fields="files(id, name)"
+        ).execute()
+        all_folders = results.get('files', [])
         
-        if folders:
-            st.success("🤖 Синхронизация с Google Диском активна!")
-            for folder in folders:
+        found_any = False
+        for folder in all_folders:
+            # Очищаем имя от лишних кавычек и пробелов для проверки
+            clean_name = folder['name'].replace('"', '').replace("'", "").strip()
+            
+            if clean_name in ['_SYSTEM_SYNC_', 'Obsidian Essence']:
+                if not found_any:
+                    st.success("🤖 Синхронизация с Google Диском активна!")
+                    found_any = True
+                
                 st.markdown(f"📁 **{folder['name']}**")
-                # Читаем файлы внутри этой папки
                 files = get_files_in_folder(service, folder['id'])
                 if files:
                     for f in files:
                         st.write(f"└ 📄 {f['name']}")
                 else:
                     st.caption("   *(Папка пуста)*")
-        else:
+                    
+        if not found_any:
             st.warning("⚠️ Структурные папки проекта не обнаружены на Диске.")
+            
     except Exception as e:
         st.error(f"Ошибка чтения структуры: {e}")
 
@@ -170,3 +176,4 @@ if prompt := st.chat_input("Введите задачу для Мозга Сту
             })
         except Exception as e:
             st.error(f"Ошибка API: {e}")
+
