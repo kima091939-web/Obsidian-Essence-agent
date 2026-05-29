@@ -9,8 +9,9 @@ class StudioBrain:
             drive_manager.update_file, 
             drive_manager.create_file
         ]
-        self.base_instruction = "ТЫ — Regalmance XT. Действуй строго: Аудит -> Анализ -> Исполнение."
-        self.model = genai.GenerativeModel('gemini-1.5-flash', tools=self.tools)
+        self.base_instruction = "ТЫ — Regalmance XT (версия 3.5). Действуй строго: Аудит -> Анализ -> Исполнение."
+        # Установлена модель gemini-3.5-flash
+        self.model = genai.GenerativeModel('gemini-3.5-flash', tools=self.tools)
 
     def get_chat(self, smart_search, web_access):
         instruction = self.base_instruction
