@@ -4,7 +4,7 @@ import pyttsx3
 from ai_engine import StudioBrain
 from drive_manager import DriveManager
 
-# 1. Инициализация движка озвучки (Голос)
+# Инициализация голоса
 def speak(text):
     engine = pyttsx3.init()
     engine.setProperty('rate', 150)
@@ -14,55 +14,49 @@ def speak(text):
 st.set_page_config(page_title="Regalmance XT Core", layout="wide")
 st.title("🚀 Regalmance XT: Full Autonomous Control")
 
-# --- ПАНЕЛЬ УПРАВЛЕНИЯ РЕЖИМАМИ ---
+# Инициализация состояний в Session State
 if 'smart_search' not in st.session_state: st.session_state.smart_search = False
 if 'web_access' not in st.session_state: st.session_state.web_access = False
 
+# Боковая панель управления
 st.sidebar.title("🛠 Контроль системы")
 st.session_state.smart_search = st.sidebar.toggle("🔐 Интеллектуальный поиск", value=st.session_state.smart_search)
 st.session_state.web_access = st.sidebar.toggle("🌐 Доступ в Интернет", value=st.session_state.web_access)
 st.sidebar.divider()
-# ----------------------------------
 
-# 2. Инициализация системы (Drive + Brain)
-if 'drive' not in st.session_state:
-    creds_info = json.loads(st.secrets["GOOGLE_DRIVE_KEY"])
-    st.session_state.drive = DriveManager(creds_info)
-    
-    tools = [
-        st.session_state.drive.list_folder, 
-        st.session_state.drive.read_file, 
-        st.session_state.drive.update_file, 
-        st.session_state.drive.create_file
-    ]
-    # Передаем начальное состояние режимов при инициализации
-    brain = StudioBrain(st.secrets["GEMINI_API_KEY"], tools)
-    st.session_state.chat = brain.get_chat(st.session_state.smart_search, st.session_state.web_access)
+# Инициализация ядра системы
+if 'brain' not in st.session_state:
+    try:
+        creds_info = json.loads(st.secrets["GOOGLE_DRIVE_KEY"])
+        drive = DriveManager(creds_info)
+        st.session_state.brain = StudioBrain(st.secrets["GEMINI_API_KEY"], drive)
+    except Exception as e:
+        st.error(f"Критическая ошибка инициализации: {e}")
+        st.stop()
 
-# 3. Визуальный блок истории чата
 if "messages" not in st.session_state: st.session_state.messages = []
+
+# Отрисовка истории чата
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]): st.write(msg["content"])
 
-# 4. Ввод: Только Текст
-prompt = st.chat_input("Введите команду для Regalmance XT...")
-
-# 5. Обработка действий
-def process_command(text):
-    if text:
-        st.session_state.messages.append({"role": "user", "content": text})
-        with st.chat_message("user"): st.write(text)
-        
-        with st.chat_message("assistant"):
-            with st.spinner("Regalmance XT думает..."):
-                # При каждом запросе обновляем контекст чата с учетом кнопок
-                st.session_state.chat = st.session_state.drive.brain.get_chat(st.session_state.smart_search, st.session_state.web_access)
-                response = st.session_state.chat.send_message(text)
+# Обработка пользовательского ввода
+if prompt := st.chat_input("Введите команду для Regalmance XT..."):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"): st.write(prompt)
+    
+    with st.chat_message("assistant"):
+        with st.spinner("Regalmance XT обрабатывает запрос..."):
+            try:
+                # Получаем чат с текущими флагами
+                chat_session = st.session_state.brain.get_chat(st.session_state.smart_search, st.session_state.web_access)
+                response = chat_session.send_message(prompt)
+                
                 st.write(response.text)
                 speak(response.text)
                 st.session_state.messages.append({"role": "assistant", "content": response.text})
+            except Exception as e:
+                st.error(f"Ошибка выполнения: {e}")
 
-if prompt:
-    process_command(prompt)
 
 
