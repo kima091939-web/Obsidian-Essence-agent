@@ -14,6 +14,16 @@ def speak(text):
 st.set_page_config(page_title="Regalmance XT Core", layout="wide")
 st.title("🚀 Regalmance XT: Full Autonomous Control")
 
+# --- ПАНЕЛЬ УПРАВЛЕНИЯ РЕЖИМАМИ ---
+if 'smart_search' not in st.session_state: st.session_state.smart_search = False
+if 'web_access' not in st.session_state: st.session_state.web_access = False
+
+st.sidebar.title("🛠 Контроль системы")
+st.session_state.smart_search = st.sidebar.toggle("🔐 Интеллектуальный поиск", value=st.session_state.smart_search)
+st.session_state.web_access = st.sidebar.toggle("🌐 Доступ в Интернет", value=st.session_state.web_access)
+st.sidebar.divider()
+# ----------------------------------
+
 # 2. Инициализация системы (Drive + Brain)
 if 'drive' not in st.session_state:
     creds_info = json.loads(st.secrets["GOOGLE_DRIVE_KEY"])
@@ -44,6 +54,7 @@ def process_command(text):
         
         with st.chat_message("assistant"):
             with st.spinner("Regalmance XT думает..."):
+                # Сюда позже мы добавим логику передачи флагов smart_search и web_access в промпт
                 response = st.session_state.chat.send_message(text)
                 st.write(response.text)
                 speak(response.text) # Бот ГОВОРИТ через динамики
@@ -51,3 +62,4 @@ def process_command(text):
 
 if prompt:
     process_command(prompt)
+
