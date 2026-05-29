@@ -10,7 +10,7 @@ CORE_BASE_ID   = "1sVM2s0DefAWRYn8i5PyRHF1aRq4Xqc12"
 
 class StudioBrain:
 
-    MODEL_NAME = "gemini-3.5-flash"
+    MODEL_NAME = "gemini-2.5-flash"
 
     def __init__(self, api_key: str, drive_manager):
         genai.configure(api_key=api_key)
