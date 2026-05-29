@@ -66,4 +66,3 @@ class StudioBrain:
             history=[],
             enable_automatic_function_calling=True,
         )
-
