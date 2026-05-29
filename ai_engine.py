@@ -10,7 +10,7 @@ class StudioBrain:
         При упоминании Матрицы сверяйся только с предоставленными файлами."""
         
         self.model = genai.GenerativeModel(
-            model_name='gemini-3.5-pro',
+            model_name='gemini-3.5-Flash',
             system_instruction=self.instruction,
             tools=tools,
             generation_config={
