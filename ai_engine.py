@@ -4,7 +4,7 @@ import google.generativeai as genai
 class StudioBrain:
     """
     Основной AI-движок Regalmance XT.
-    Использует Gemini 1.5 Flash с инструментами Google Drive.
+    Использует Gemini 3.5 Flash с инструментами Google Drive.
     """
 
     # Корректное название модели Gemini (gemini-3.5-flash не существует)
