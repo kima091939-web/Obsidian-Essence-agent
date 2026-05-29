@@ -1,48 +1,42 @@
 import io, json
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
 from google.oauth2 import service_account
 
 class DriveManager:
     def __init__(self, secrets_dict):
-        if isinstance(secrets_dict, str): secrets_dict = json.loads(secrets_dict)
+        # Преобразование данных, если пришел словарь или строка
+        creds_data = json.loads(secrets_dict) if isinstance(secrets_dict, str) else secrets_dict
         creds = service_account.Credentials.from_service_account_info(
-            secrets_dict, 
+            creds_data,
             scopes=['https://www.googleapis.com/auth/drive']
         )
         self.service = build('drive', 'v3', credentials=creds)
-        # Сохраняем ссылку на объект для связи с Brain (если потребуется)
-        self.brain = None 
 
-    def list_folder(self, folder_id):
-        """Интеллектуальный аудит папки."""
+    def list_folder(self, folder_id: str):
         try:
-            files = self.service.files().list(
-                q=f"'{folder_id}' in parents and trashed = false", 
-                fields="files(id, name)"
-            ).execute()
-            return files.get('files', [])
+            results = self.service.files().list(q=f"'{folder_id}' in parents and trashed = false").execute()
+            return str(results.get('files', []))
         except Exception as e:
-            return f"Ошибка доступа к папке: {str(e)}"
+            return f"Ошибка доступа к папке: {e}"
 
-    def read_file(self, file_id):
-        """Чтение данных — только по прямому запросу."""
+    def read_file(self, file_id: str):
         try:
             return self.service.files().get_media(fileId=file_id).execute().decode('utf-8')
         except Exception as e:
-            return f"Ошибка чтения: {str(e)}"
+            return f"Ошибка чтения файла: {e}"
 
-    def update_file(self, file_id, new_content):
-        """Синхронизация с Матрицей."""
-        media = MediaIoBaseUpload(io.BytesIO(new_content.encode('utf-8')), mimetype='text/plain', resumable=True)
-        self.service.files().update(fileId=file_id, media_body=media).execute()
-        return "Файл успешно синхронизирован с Матрицей."
+    def update_file(self, file_id: str, new_content: str):
+        try:
+            self.service.files().update(fileId=file_id, media_body=io.BytesIO(new_content.encode())).execute()
+            return "Файл успешно обновлен."
+        except Exception as e:
+            return f"Ошибка обновления: {e}"
 
-    def create_file(self, folder_id, file_name, content):
-        """Создание новой структуры."""
-        meta = {'name': file_name, 'parents': [folder_id]}
-        media = MediaIoBaseUpload(io.BytesIO(content.encode('utf-8')), mimetype='text/plain')
-        file = self.service.files().create(body=meta, media_body=media, fields='id').execute()
-        return f"Создан объект: {file_name} (ID: {file.get('id')})"
-
+    def create_file(self, folder_id: str, file_name: str, content: str):
+        try:
+            meta = {'name': file_name, 'parents': [folder_id]}
+            file = self.service.files().create(body=meta, media_body=io.BytesIO(content.encode())).execute()
+            return f"Файл {file_name} создан. ID: {file.get('id')}"
+        except Exception as e:
+            return f"Ошибка создания: {e}"
 
