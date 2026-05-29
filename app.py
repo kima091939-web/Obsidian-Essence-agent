@@ -35,8 +35,9 @@ if 'drive' not in st.session_state:
         st.session_state.drive.update_file, 
         st.session_state.drive.create_file
     ]
+    # Передаем начальное состояние режимов при инициализации
     brain = StudioBrain(st.secrets["GEMINI_API_KEY"], tools)
-    st.session_state.chat = brain.get_chat()
+    st.session_state.chat = brain.get_chat(st.session_state.smart_search, st.session_state.web_access)
 
 # 3. Визуальный блок истории чата
 if "messages" not in st.session_state: st.session_state.messages = []
@@ -54,12 +55,14 @@ def process_command(text):
         
         with st.chat_message("assistant"):
             with st.spinner("Regalmance XT думает..."):
-                # Сюда позже мы добавим логику передачи флагов smart_search и web_access в промпт
+                # При каждом запросе обновляем контекст чата с учетом кнопок
+                st.session_state.chat = st.session_state.drive.brain.get_chat(st.session_state.smart_search, st.session_state.web_access)
                 response = st.session_state.chat.send_message(text)
                 st.write(response.text)
-                speak(response.text) # Бот ГОВОРИТ через динамики
+                speak(response.text)
                 st.session_state.messages.append({"role": "assistant", "content": response.text})
 
 if prompt:
     process_command(prompt)
+
 
