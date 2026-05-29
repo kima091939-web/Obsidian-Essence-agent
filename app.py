@@ -11,7 +11,7 @@ def speak(text):
     engine.runAndWait()
 
 st.set_page_config(page_title="Regalmance XT Core", layout="wide")
-st.title("🚀 Regalmance XT: Full Autonomous Control")
+st.title("🚀 Regalmance XT: Full Autonomous Control (v3.5)")
 
 if 'smart_search' not in st.session_state: st.session_state.smart_search = False
 if 'web_access' not in st.session_state: st.session_state.web_access = False
@@ -34,7 +34,7 @@ if prompt := st.chat_input("Введите команду..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.write(prompt)
     with st.chat_message("assistant"):
-        with st.spinner("Regalmance XT думает..."):
+        with st.spinner("Regalmance XT (3.5) думает..."):
             chat = st.session_state.brain.get_chat(st.session_state.smart_search, st.session_state.web_access)
             response = chat.send_message(prompt)
             st.write(response.text)
