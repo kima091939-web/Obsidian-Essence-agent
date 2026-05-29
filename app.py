@@ -1,43 +1,22 @@
 import json
-import tempfile
+import io
 import streamlit as st
-from audio_recorder_streamlit import audio_recorder
+from gtts import gTTS
 from ai_engine import StudioBrain
 from drive_manager import DriveManager
 
 # ──────────────────────────────────────────────
-# Озвучка через Google TTS (работает в Streamlit)
+# Озвучка через gTTS (кнопка воспроизведения)
 # ──────────────────────────────────────────────
 def speak(text: str):
-    """Озвучивает текст через встроенный HTML-audio Streamlit."""
     try:
-        from gtts import gTTS
-        import io
         tts = gTTS(text=text, lang="ru")
         buf = io.BytesIO()
         tts.write_to_fp(buf)
         buf.seek(0)
-        st.audio(buf, format="audio/mp3", autoplay=True)
+        st.audio(buf, format="audio/mp3")
     except Exception as e:
         st.warning(f"Ошибка озвучки: {e}")
-
-
-# ──────────────────────────────────────────────
-# Распознавание голоса через Whisper (локально)
-# ──────────────────────────────────────────────
-def transcribe_audio(audio_bytes: bytes) -> str | None:
-    """Конвертирует аудио-байты в текст через OpenAI Whisper."""
-    try:
-        import openai, io
-        client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-        buf = io.BytesIO(audio_bytes)
-        buf.name = "voice.wav"
-        result = client.audio.transcriptions.create(model="whisper-1", file=buf)
-        return result.text
-    except Exception as e:
-        st.error(f"Ошибка распознавания голоса: {e}")
-        return None
-
 
 # ──────────────────────────────────────────────
 # Конфигурация страницы
@@ -92,29 +71,9 @@ for msg in st.session_state.messages:
         st.write(msg["content"])
 
 # ──────────────────────────────────────────────
-# Ввод: голос + текст
+# Ввод: текст (голос — через микрофон клавиатуры)
 # ──────────────────────────────────────────────
-st.markdown("#### 🎙 Голосовой ввод")
-audio_bytes = audio_recorder(
-    text="Нажмите для записи",
-    recording_color="#e87070",
-    neutral_color="#6aa36f",
-    icon_size="2x",
-)
-
-input_text = None
-
-# Приоритет: сначала голос (если записан), потом текст
-if audio_bytes and len(audio_bytes) > 1000:  # фильтр пустых записей
-    with st.spinner("Распознаю голос..."):
-        transcribed = transcribe_audio(audio_bytes)
-    if transcribed:
-        st.info(f"🎤 Распознано: *{transcribed}*")
-        input_text = transcribed
-
-text_input = st.chat_input("Или введите команду...")
-if text_input:
-    input_text = text_input
+input_text = st.chat_input("Введите или скажите команду 🎤")
 
 # ──────────────────────────────────────────────
 # Обработка запроса
@@ -138,4 +97,5 @@ if input_text:
                 st.session_state.messages.append({"role": "assistant", "content": answer})
             except Exception as e:
                 st.error(f"Ошибка ответа: {e}")
+
 
