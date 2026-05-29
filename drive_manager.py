@@ -25,3 +25,4 @@ class DriveManager:
         file = self.service.files().create(body={'name': file_name, 'parents': [folder_id]}, 
                                           media_body=io.BytesIO(content.encode())).execute()
         return f"Создан ID: {file.get('id')}"
+
