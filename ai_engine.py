@@ -62,9 +62,12 @@ class StudioBrain:
             else:
                 mode_instruction += "📁 Доступ к файлам ВЫКЛЮЧЕН: не обращайся к Drive.\n"
 
-            # Интернет — полностью независимо от файлов
+            # ✅ ИСПРАВЛЕНО: правильный способ подключения Google Search
             if web_access:
-                tools.append({"google_search": {}})
+                google_search_tool = genai.protos.Tool(
+                    google_search=genai.protos.Tool.GoogleSearch()
+                )
+                tools.append(google_search_tool)
                 mode_instruction += (
                     "🌐 Интернет ВКЛЮЧЁН: используй Google Search для актуальной информации.\n"
                 )
@@ -106,4 +109,4 @@ class StudioBrain:
         return model.start_chat(
             history=[],
             enable_automatic_function_calling=True,
-            )
+        )
