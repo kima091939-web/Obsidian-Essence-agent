@@ -7,11 +7,20 @@ from google.oauth2 import service_account
 
 class DriveManager:
     """
-    Менеджер Google Drive.
-    Поддерживает: чтение, создание, обновление файлов и листинг папок.
+    Менеджер Google Drive + Google Docs.
+    Поддерживает: чтение текстовых файлов, Google Docs, создание, обновление и листинг папок.
     """
 
-    SCOPES = ["https://www.googleapis.com/auth/drive"]
+    SCOPES = [
+        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/documents.readonly",
+    ]
+
+    # MIME-типы Google Docs Editor файлов
+    GOOGLE_DOCS_MIME    = "application/vnd.google-apps.document"
+    GOOGLE_SHEETS_MIME  = "application/vnd.google-apps.spreadsheet"
+    GOOGLE_SLIDES_MIME  = "application/vnd.google-apps.presentation"
+    GOOGLE_FOLDER_MIME  = "application/vnd.google-apps.folder"
 
     def __init__(self, secrets_dict: dict | str):
         """
@@ -25,6 +34,7 @@ class DriveManager:
             scopes=self.SCOPES,
         )
         self.service = build("drive", "v3", credentials=creds)
+        self.docs_service = build("docs", "v1", credentials=creds)
 
     # ──────────────────────────────────────────────
     # Инструменты (вызываются Gemini как functions)
@@ -61,7 +71,12 @@ class DriveManager:
 
     def read_file(self, file_id: str) -> str:
         """
-        Читает содержимое текстового файла из Google Drive.
+        Читает содержимое файла из Google Drive.
+        Автоматически определяет тип файла:
+        - Google Docs → экспортирует как plain text
+        - Google Sheets → экспортирует как CSV
+        - Google Slides → экспортирует как plain text
+        - Обычные файлы → читает напрямую
 
         Args:
             file_id: ID файла Google Drive.
@@ -70,18 +85,67 @@ class DriveManager:
             Текстовое содержимое файла.
         """
         try:
-            content = (
-                self.service.files()
-                .get_media(fileId=file_id)
-                .execute()
-            )
-            return content.decode("utf-8")
+            # Определяем тип файла
+            meta = self.service.files().get(
+                fileId=file_id,
+                fields="mimeType, name"
+            ).execute()
+            mime = meta.get("mimeType", "")
+            name = meta.get("name", file_id)
+
+            # Google Docs → экспорт в plain text
+            if mime == self.GOOGLE_DOCS_MIME:
+                content = self.service.files().export(
+                    fileId=file_id,
+                    mimeType="text/plain"
+                ).execute()
+                if isinstance(content, bytes):
+                    return content.decode("utf-8")
+                return str(content)
+
+            # Google Sheets → экспорт в CSV
+            elif mime == self.GOOGLE_SHEETS_MIME:
+                content = self.service.files().export(
+                    fileId=file_id,
+                    mimeType="text/csv"
+                ).execute()
+                if isinstance(content, bytes):
+                    return content.decode("utf-8")
+                return str(content)
+
+            # Google Slides → экспорт в plain text
+            elif mime == self.GOOGLE_SLIDES_MIME:
+                content = self.service.files().export(
+                    fileId=file_id,
+                    mimeType="text/plain"
+                ).execute()
+                if isinstance(content, bytes):
+                    return content.decode("utf-8")
+                return str(content)
+
+            # Папка — нельзя читать как файл
+            elif mime == self.GOOGLE_FOLDER_MIME:
+                return f"⚠️ '{name}' — это папка. Используй list_folder для просмотра содержимого."
+
+            # Обычный текстовый файл
+            else:
+                content = (
+                    self.service.files()
+                    .get_media(fileId=file_id)
+                    .execute()
+                )
+                if isinstance(content, bytes):
+                    return content.decode("utf-8")
+                return str(content)
+
         except Exception as e:
             return f"Ошибка read_file: {e}"
 
     def update_file(self, file_id: str, new_content: str) -> str:
         """
         Обновляет содержимое существующего файла в Google Drive.
+        Работает только для plain text файлов.
+        Для Google Docs используй create_file для создания новой версии.
 
         Args:
             file_id: ID файла для обновления.
@@ -91,6 +155,20 @@ class DriveManager:
             Сообщение об успехе или ошибке.
         """
         try:
+            # Проверяем тип файла
+            meta = self.service.files().get(
+                fileId=file_id,
+                fields="mimeType, name"
+            ).execute()
+            mime = meta.get("mimeType", "")
+
+            if mime in (self.GOOGLE_DOCS_MIME, self.GOOGLE_SHEETS_MIME, self.GOOGLE_SLIDES_MIME):
+                return (
+                    f"⚠️ Файл является Google Docs Editor файлом ({mime}). "
+                    "Прямое обновление недоступно. "
+                    "Используй create_file для создания нового текстового файла."
+                )
+
             media = MediaIoBaseUpload(
                 io.BytesIO(new_content.encode("utf-8")),
                 mimetype="text/plain",
